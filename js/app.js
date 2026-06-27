@@ -201,11 +201,12 @@ class VideoForgeApp {
     const W = 1280;
     const H = 720;
 
-    const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
+const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'
       : MediaRecorderClass.isTypeSupported('video/webm;codecs=vp8')
         ? 'video/webm;codecs=vp8'
-        ? 'video/webm'
+        : MediaRecorderClass.isTypeSupported('video/webm')
+          ? 'video/webm'
           : (console.warn('⚠️ Поддерживается только кодировка VP9 или VP8. Запись будет некачественной'), 'video/webm');
 
     const canvas = document.createElement('canvas');
@@ -313,7 +314,7 @@ class VideoForgeApp {
     if (lowerPrompt.includes('море') || lowerPrompt.includes('плыть')) {
       addAction('boat', 0, H * 0.7, W * 0.8, H * 0.3);
     }
-    if (lowerPrompt.includes('вулкан') || lowerPrompt.includes('о)) {
+    if (lowerPrompt.includes('вулкан') || lowerPrompt.includes('огонь')) {
       addAction('fire', 0, 0, W, H, { intensity: 30 });
     }
 
