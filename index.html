@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🎬 VideoForge — AI Генератор Видео</title>
+  <link rel="stylesheet" href="css/style.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="container header-inner">
+      <div class="logo">
+        <span class="logo-icon">🎬</span>
+        <span class="logo-text">Video<span class="logo-highlight">Forge</span></span>
+      </div>
+      <div class="header-right">
+        <div class="usage-badge" id="usageBadge">
+          <span class="usage-icon">📊</span>
+          <span id="usageText">Загрузка...</span>
+        </div>
+        <a href="#subscribe" class="btn btn-subscribe">Премиум</a>
+      </div>
+    </div>
+  </header>
+
+  <!-- Hero Section -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-content">
+        <div class="hero-badge">🚀 Новинка 2026</div>
+        <h1 class="hero-title">
+          Преврати свой текст<br>
+          в <span class="gradient-text">захватывающее видео</span>
+        </h1>
+        <p class="hero-subtitle">
+          Нейросеть создаёт уникальные видео по твоему описанию. 
+          Добавь фото как референс — и получишь ещё более точный результат!
+        </p>
+        <div class="hero-stats">
+          <div class="hero-stat">
+            <span class="stat-value">10</span>
+            <span class="stat-label">бесплатных видео<br>в день</span>
+          </div>
+          <div class="hero-stat">
+            <span class="stat-value">5-10с</span>
+            <span class="stat-label">длительность<br>видео</span>
+          </div>
+          <div class="hero-stat">
+            <span class="stat-value">HD</span>
+            <span class="stat-label">качество<br>720p</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Generator Section -->
+  <section class="generator" id="generator">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">🎯 Создать видео</h2>
+        <p class="section-desc">Опиши сюжет — ИИ воплотит его в жизнь</p>
+      </div>
+
+      <div class="generator-card">
+        <div class="usage-bar">
+          <div class="usage-bar-header">
+            <span>Бесплатные генерации сегодня</span>
+            <span id="usageCounter" class="usage-counter">0 / 10</span>
+          </div>
+          <div class="usage-progress">
+            <div class="usage-progress-fill" id="usageProgressFill" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <form id="generateForm" class="generate-form">
+          <div class="form-group">
+            <label for="prompt" class="form-label">🎬 Опиши видео, которое хочешь создать</label>
+            <textarea 
+              id="prompt" 
+              class="form-input form-textarea" 
+              placeholder="Например: Закат на пляже, волны нежно набегают на берег, чайки парят в небе, тёплые оранжевые тона..."
+              rows="4"
+              required
+              minlength="3"
+            ></textarea>
+            <div class="form-hint">
+              <span>Чем детальнее описание, тем лучше результат ✨</span>
+              <span id="promptCounter">0 символов</span>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">🖼️ Референс-изображение (необязательно)</label>
+            <div class="file-upload" id="fileUpload">
+              <input type="file" id="imageInput" accept="image/jpeg,image/png,image/webp,image/gif" class="file-input">
+              <div class="file-upload-content">
+                <div class="file-upload-icon">📤</div>
+                <div class="file-upload-text">
+                  <span class="file-upload-title">Нажми для загрузки</span>
+                  <span class="file-upload-hint">JPEG, PNG, WebP, GIF — до 10MB</span>
+                </div>
+              </div>
+              <div class="file-preview" id="filePreview" style="display: none;">
+                <img id="previewImage" src="" alt="Preview">
+                <button type="button" class="file-remove" id="removeFile">✕</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group form-group-half">
+              <label for="duration" class="form-label">⏱️ Длительность</label>
+              <select id="duration" class="form-input form-select">
+                <option value="5">5 секунд</option>
+                <option value="10">10 секунд</option>
+              </select>
+            </div>
+            <div class="form-group form-group-half">
+              <label class="form-label">📺 Качество</label>
+              <div class="quality-badge">HD 720p</div>
+            </div>
+          </div>
+
+          <button type="submit" class="btn btn-generate" id="generateBtn">
+            <span class="btn-text">✨ Сгенерировать видео</span>
+            <span class="btn-loading" style="display: none;">
+              <span class="spinner"></span>
+              Генерация...
+            </span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <!-- Status Section -->
+  <section class="status-section" id="statusSection" style="display: none;">
+    <div class="container">
+      <div class="status-card" id="statusCard">
+        <div class="status-pending" id="statusPending">
+          <div class="status-spinner">
+            <div class="spinner-large"></div>
+          </div>
+          <h3>⏳ Видео создаётся...</h3>
+          <p>Генерация в браузере. Это может занять 1-2 минуты.</p>
+          <div class="status-tips">
+            <div class="tip" id="tip1">🎨 ИИ анализирует твой запрос</div>
+            <div class="tip" id="tip2">🎥 Генерирует кадры</div>
+            <div class="tip" id="tip3">✨ Собирает финальное видео</div>
+          </div>
+        </div>
+        <div class="status-completed" id="statusCompleted" style="display: none;">
+          <div class="success-check">✅</div>
+          <h3>🎉 Видео готово!</h3>
+          <div class="video-container">
+            <video id="generatedVideo" controls playsinline>
+              Ваш браузер не поддерживает видео.
+            </video>
+          </div>
+          <a class="btn btn-download" id="downloadBtn" download="ai-video.mp4">
+            ⬇️ Скачать видео
+          </a>
+        </div>
+        <div class="status-failed" id="statusFailed" style="display: none;">
+          <div class="error-icon">❌</div>
+          <h3>😕 Что-то пошло не так</h3>
+          <p id="errorMessage">Не удалось сгенерировать видео. Попробуй ещё раз.</p>
+          <button class="btn btn-retry" onclick="document.getElementById('generateForm').dispatchEvent(new Event('submit'))">
+            🔄 Попробовать снова
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Gallery Section -->
+  <section class="gallery" id="history">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">📂 История генераций</h2>
+        <p class="section-desc">Твои созданные видео</p>
+      </div>
+      <div class="gallery-grid" id="galleryGrid">
+        <div class="gallery-empty">
+          <div class="empty-icon">🎬</div>
+          <h3>Пока нет видео</h3>
+          <p>Создай своё первое видео с помощью ИИ!</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Subscribe Section -->
+  <section class="subscribe" id="subscribe">
+    <div class="container">
+      <div class="section-header">
+        <h2 class="section-title">⭐ Премиум-подписка</h2>
+        <p class="section-desc">Разблокируй безлимитные возможности</p>
+      </div>
+      <div class="pricing-cards">
+        <div class="pricing-card free-card">
+          <div class="pricing-badge">Бесплатно</div>
+          <div class="pricing-header">
+            <h3>🌟 Стартовый</h3>
+            <div class="pricing-price">0 ₽</div>
+            <p>всегда бесплатно</p>
+          </div>
+          <ul class="pricing-features">
+            <li>✅ 10 видео в день</li>
+            <li>✅ Длительность до 10 секунд</li>
+            <li>✅ Качество 720p</li>
+            <li>✅ Загрузка референсов</li>
+            <li>❌ Приоритетная обработка</li>
+            <li>❌ 4K качество</li>
+          </ul>
+          <button class="btn btn-card active">Текущий план</button>
+        </div>
+        <div class="pricing-card premium-card featured">
+          <div class="pricing-badge premium-badge">🔥 Популярное</div>
+          <div class="pricing-header">
+            <h3>🚀 Pro</h3>
+            <div class="pricing-price">499 ₽</div>
+            <p>в месяц</p>
+          </div>
+          <ul class="pricing-features">
+            <li>✅ Безлимитные генерации</li>
+            <li>✅ Длительность до 30 секунд</li>
+            <li>✅ Качество 4K</li>
+            <li>✅ Загрузка референсов</li>
+            <li>✅ Приоритетная обработка</li>
+            <li>✅ Экспорт без водяных знаков</li>
+          </ul>
+          <button class="btn btn-card btn-premium" onclick="alert('🚀 Премиум-подписка скоро будет доступна! Следите за обновлениями.')">
+            ⏳ Скоро
+          </button>
+        </div>
+        <div class="pricing-card enterprise-card">
+          <div class="pricing-badge">Для команд</div>
+          <div class="pricing-header">
+            <h3>🏢 Business</h3>
+            <div class="pricing-price">1 499 ₽</div>
+            <p>в месяц</p>
+          </div>
+          <ul class="pricing-features">
+            <li>✅ Всё из Pro</li>
+            <li>✅ 5 пользователей</li>
+            <li>✅ Приоритетная поддержка</li>
+            <li>✅ API доступ</li>
+            <li>✅ Свои модели</li>
+            <li>✅ Аналитика</li>
+          </ul>
+          <button class="btn btn-card" onclick="alert('🏢 Business-план скоро будет доступен!')">
+            ⏳ Скоро
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer class="footer">
+    <div class="container">
+      <div class="footer-content">
+        <div class="footer-logo">
+          <span class="logo-icon">🎬</span>
+          <span class="logo-text">Video<span class="logo-highlight">Forge</span></span>
+        </div>
+        <p class="footer-text">Создано с ❤️ для творческих людей. Работает на базе AI.</p>
+      </div>
+    </div>
+  </footer>
+
+  <!-- Toast -->
+  <div class="toast" id="toast">
+    <div class="toast-content">
+      <span class="toast-icon" id="toastIcon">✅</span>
+      <span id="toastMessage">Готово!</span>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
