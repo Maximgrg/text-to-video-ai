@@ -81,7 +81,15 @@ class VideoForgeApp {
       this.fileUpload.querySelector('.file-upload-content').style.display = 'block';
     });
 
-    this.form.addEventListener('submit', (e) => this.handleGenerate(e));
+    this.form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      console.log('🔄 Form submitted, generating video...');
+      if (!this.promptInput.value.trim()) {
+        this.showToast('\u274C', 'Please enter some text');
+        return;
+      }
+      this.handleGenerate(e);
+    });
   }
 
   loadUsage() {
