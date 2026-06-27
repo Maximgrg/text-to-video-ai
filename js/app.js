@@ -319,13 +319,15 @@ class VideoForgeApp {
 
   async loadFFmpeg() {
     const base = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    const { FFmpeg } = await import('https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm/index.js');
+    const ffBase = 'https://unpkg.com/@ffmpeg/ffmpeg@0.12.10/dist/esm';
+    const { FFmpeg } = await import(`${ffBase}/index.js`);
     const { toBlobURL } = await import('https://unpkg.com/@ffmpeg/util@0.12.1/dist/esm/index.js');
     const ff = new FFmpeg();
     ff.on('log', ({ message }) => console.log('[ffmpeg]', message));
     await ff.load({
       coreURL: await toBlobURL(`${base}/ffmpeg-core.js`, 'text/javascript'),
       wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+      workerURL: await toBlobURL(`${ffBase}/worker.js`, 'text/javascript'),
     });
     return ff;
   }
