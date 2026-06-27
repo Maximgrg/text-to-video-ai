@@ -177,8 +177,19 @@ class VideoForgeApp {
   }
 
   async generateVideo(prompt, duration) {
-    if (typeof MediaRecorder === 'undefined' || !canvas?.captureStream) {
-      throw new Error('Ваш браузер не поддерживает запись видео. Используйте Chrome, Firefox или Safari.');
+    const navigator = window.navigator;
+    const MediaRecorderClass = window.MediaRecorder;
+    
+    if (typeof MediaRecorderClass === 'undefined') {
+      throw new Error('MediaRecorder не поддерживается вашим браузером');
+    }
+
+    if (!HTMLCanvasElement.prototype.captureStream) {
+      throw new Error('Canvas.captureStream не поддерживается в вашем браузере');
+    }
+
+    if (!HTMLVideoElement.prototype.captureStream) {
+      throw new Error('Video.captureStream не поддерживается в вашем браузере');
     }
 
     const fps = 10;
@@ -186,22 +197,30 @@ class VideoForgeApp {
     const W = 1280;
     const H = 720;
 
-    const mime = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+    const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'
-      : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+      : MediaRecorderClass.isTypeSupported('video/webm;codecs=vp8')
         ? 'video/webm;codecs=vp8'
-        : 'video/webm';
+        : MediaRecorderClass.isTypeSupported('video/webm')
+          ? 'video/webm'
+          : (console.warn('⚠️ Поддерживается только кодировка VP9 или VP8. Запись будет некачественной'), 'video/webm');
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
-    const ctx = canvas.getContext('2d', { willReadFrequently: false });
-    const stream = canvas.captureStream(fps);
-    const recorder = new MediaRecorder(stream, { mimeType: mime });
-    const chunks = [];
-    const ext = mime.includes('vp9') || mime.includes('vp8') ? 'webm' : 'webm';
+    const ctx = canvas.getContext('2d');
+    ctx.imageSmoothingEnabled = false;
 
-    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+    const stream = canvas.captureStream(fps);
+
+    const recorder = new MediaRecorderClass(stream, { mimeType });
+    const chunks = [];
+
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+
+    recorder.onstop = () => {};
 
     const frames = [];
     const scrollStart = H + 80;
@@ -211,6 +230,7 @@ class VideoForgeApp {
       const t = totalFrames > 1 ? f / (totalFrames - 1) : 0;
       this.drawFrame(ctx, W, H, prompt, t, f, totalFrames, duration, scrollStart, scrollEnd);
       frames.push(ctx.getImageData(0, 0, W, H));
+
       if (f % 10 === 0 || f === totalFrames - 1) {
         this.updateTips([
           '\u{1F3A8} Рендеринг кадров...',
@@ -227,36 +247,42 @@ class VideoForgeApp {
     ]);
 
     return new Promise((resolve, reject) => {
-      let frameIdx = 0;
+      let frameIndex = 0;
       let resolveTimeout;
 
-      recorder.onstop = () => {
+      function renderFrame() {
+        if (frameIndex < frames.length) {
+          ctx.putImageData(frames[frameIndex], 0, 0);
+          frameIndex++;
+          setTimeout(renderFrame, 1000 / fps);
+        } else {
+          if (recorder.state !== 'inactive') {
+            recorder.stop();
+          }
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          resolve({ blob });
+        }
+      }
+
+      function stopRecording() {
         clearTimeout(resolveTimeout);
-        const blob = new Blob(chunks, { type: 'video/webm' });
-        resolve({ blob, ext });
+        setTimeout(() => {
+          if (recorder.state !== 'inactive') {
+            recorder.stop();
+          }
+        }, 100);
+      }
+
+      recorder.onerror = (e) => {
+        clearTimeout(resolveTimeout);
+        console.error('Recorder error:', e);
+        reject(new Error('Ошибка MediaRecorder'));
       };
 
-      recorder.onerror = () => reject(new Error('Ошибка записи видео'));
+      recorder.start(1000 / fps);
+      resolveTimeout = setTimeout(stopRecording, (totalFrames + 10) * 1000 / fps);
 
-      const frameInterval = 1000 / fps;
-      const play = () => {
-        if (frameIdx >= totalFrames) {
-          recorder.stop();
-          return;
-        }
-        ctx.putImageData(frames[frameIdx], 0, 0);
-        frameIdx++;
-        setTimeout(play, frameInterval);
-      };
-
-      recorder.start(frameInterval);
-      resolveTimeout = setTimeout(() => {
-        if (frameIdx < totalFrames) {
-          frameIdx = totalFrames;
-          recorder.stop();
-        }
-      }, (totalFrames + 2) * frameInterval + 1000);
-      play();
+      setTimeout(renderFrame, 10);
     });
   }
 
