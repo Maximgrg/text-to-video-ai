@@ -188,10 +188,6 @@ class VideoForgeApp {
       throw new Error('Canvas.captureStream не поддерживается в вашем браузере');
     }
 
-    if (!HTMLVideoElement.prototype.captureStream) {
-      throw new Error('Video.captureStream не поддерживается в вашем браузере');
-    }
-
     const fps = 10;
     const totalFrames = duration * fps;
     const W = 1280;
@@ -201,8 +197,7 @@ class VideoForgeApp {
       ? 'video/webm;codecs=vp9'
       : MediaRecorderClass.isTypeSupported('video/webm;codecs=vp8')
         ? 'video/webm;codecs=vp8'
-        : MediaRecorderClass.isTypeSupported('video/webm')
-          ? 'video/webm'
+        ? 'video/webm'
           : (console.warn('⚠️ Поддерживается только кодировка VP9 или VP8. Запись будет некачественной'), 'video/webm');
 
     const canvas = document.createElement('canvas');
@@ -223,12 +218,12 @@ class VideoForgeApp {
     recorder.onstop = () => {};
 
     const frames = [];
-    const scrollStart = H + 80;
-    const scrollEnd = -200;
+
+    const actionScene = this.parseActionPrompt(prompt);
 
     for (let f = 0; f < totalFrames; f++) {
       const t = totalFrames > 1 ? f / (totalFrames - 1) : 0;
-      this.drawFrame(ctx, W, H, prompt, t, f, totalFrames, duration, scrollStart, scrollEnd);
+      this.renderActionFrame(ctx, W, H, prompt, actionScene, t, f, totalFrames, duration);
       frames.push(ctx.getImageData(0, 0, W, H));
 
       if (f % 10 === 0 || f === totalFrames - 1) {
@@ -286,7 +281,42 @@ class VideoForgeApp {
     });
   }
 
-  drawFrame(ctx, W, H, prompt, t, f, totalFrames, duration, scrollStart, scrollEnd) {
+  parseActionPrompt(prompt) {
+    const actions = [];
+
+    const addAction = (type, x, y, w, h, params = {}) => {
+      actions.push({ type, x, y, w, h, params, startFrame: Date.now() });
+    };
+
+    const lowerPrompt = prompt.toLowerCase();
+
+    if (lowerPrompt.includes('закат') || lowerPrompt.includes('восход солнца')) {
+      addAction('sunset', 0, 0, W, H, { color: '#FF6B35', time: Math.random() * 0.8 });
+    }
+    if (lowerPrompt.includes('дождь') || lowerPrompt.includes('снег')) {
+      addAction('rain', 0, 0, W, H, { intensity: 20 });
+    }
+    if (lowerPrompt.includes('волн') || lowerPrompt.includes('океан')) {
+      addAction('wave', 0, H * 0.3, W, H * 0.5);
+    }
+    if (lowerPrompt.includes('волк') || lowerPrompt.includes('волч')) {
+      addAction('wolf', Math.random() * W * 0.8, Math.random() * H * 0.8, W * 0.15, H * 0.15);
+    }
+    if (lowerPrompt.includes('море') || lowerPrompt.includes('плыть')) {
+      addAction('boat', 0, H * 0.7, W * 0.8, H * 0.3);
+    }
+    if (lowerPrompt.includes('вулкан') || lowerPrompt.includes('о)) {
+      addAction('fire', 0, 0, W, H, { intensity: 30 });
+    }
+
+    if (actions.length === 0) {
+      addAction('rain', 0, 0, W, H, { intensity: 10 });
+    }
+
+    return { actions };
+  }
+
+  renderActionFrame(ctx, W, H, prompt, actionScene, t, f, totalFrames, duration) {
     const grad = ctx.createLinearGradient(0, 0, 0, H);
     grad.addColorStop(0, '#0d0d1a');
     grad.addColorStop(0.4 + Math.sin(t * Math.PI * 2) * 0.04, '#1a1a3e');
@@ -325,9 +355,13 @@ class VideoForgeApp {
     ctx.lineTo(W / 2 + 60, 125);
     ctx.stroke();
 
-    const textY = scrollStart + (scrollEnd - scrollStart) * t;
+    this.renderWeatherEffects(ctx, W, H, t);
+
+    this.drawActionElements(ctx, W, H, actionScene, t, f, totalFrames, duration);
+
     ctx.fillStyle = '#ffffff';
     ctx.font = '32px "Inter", Arial, sans-serif';
+    const textY = H - 60;
     this.wrapText(ctx, prompt, W / 2, textY, W - 120, 48);
 
     ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
@@ -337,11 +371,173 @@ class VideoForgeApp {
     ctx.fillText(`${duration}s | ${f + 1}/${totalFrames}`, W - 20, H - 10);
   }
 
+  drawActionElements(ctx, W, H, actionScene, t, f, totalFrames, duration) {
+    const scene = actionScene.actions;
+
+    for (const element of scene) {
+      const elementX = this.easeInOut(element.x, element.x + (element.w || W), t);
+      const elementY = this.easeInOut(element.y, element.y + (element.h || H), t);
+      const elementSize = this.easeInOut(0.5, 1.0, Math.sin(t * 2) * 0.5 + 0.5);
+
+      ctx.save();
+
+      switch (element.type) {
+        case 'wave':
+          this.drawWave(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t);
+          break;
+        case 'boat':
+          this.drawBoat(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t);
+          break;
+        case 'sunset':
+          this.drawSunset(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t, element.params);
+          break;
+        case 'rain':
+          this.drawRain(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t, element.params);
+          break;
+        case 'wolf':
+          this.drawWolf(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t);
+          break;
+        case 'fire':
+          this.drawFire(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t, element.params);
+          break;
+        default:
+          this.drawElement(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, element.params);
+      }
+
+      ctx.restore();
+    }
+  }
+
+  easeInOut(start, end, t) {
+    const ease = t * t * (3 - 2 * t);
+    return start + (end - start) * ease;
+  }
+
+  drawWave(ctx, x, y, w, h, t) {
+    ctx.strokeStyle = 'rgba(0, 119, 190, 0.4)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 0; i < 100; i++) {
+      const height = Math.sin(t * 2 + i * 0.1) * 30 + 50;
+      const xPos = x + i * w * 0.01;
+      if (i === 0) ctx.moveTo(xPos, y + h);
+      else ctx.lineTo(xPos, y + h - height);
+    }
+    ctx.stroke();
+  }
+
+  drawBoat(ctx, x, y, w, h, t) {
+    ctx.fillStyle = '#8B4513';
+    ctx.fillRect(x, y + h * 0.3, w, h * 0.3);
+
+    ctx.strokeStyle = '#654321';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x + w * 0.7, y + h * 0.4, w * 0.4, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = '#FF4444';
+    ctx.font = '12px "Inter"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('⛵', x + w * 0.5, y + h * 0.3);
+  }
+
+  drawSunset(ctx, x, y, w, h, t, params) {
+    const gradient = ctx.createLinearGradient(0, y, 0, y + h);
+    gradient.addColorStop(0, '#FF4500');
+    gradient.addColorStop(0.5, '#FFD700');
+    gradient.addColorStop(1, '#8B0000');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, w, h);
+
+    ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
+    for (let i = 0; i < 20; i++) {
+      ctx.beginPath();
+      ctx.arc(x + Math.random() * w, y + Math.random() * h, Math.random() * 20, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  drawRain(ctx, x, y, w, h, t, params) {
+    ctx.fillStyle = 'rgba(174, 194, 224, 0.3)';
+    for (let i = 0; i < 30; i++) {
+      const dropX = x + Math.random() * w;
+      const dropY = y + Math.random() * h;
+      const dropLength = Math.random() * 20 + 10;
+      ctx.beginPath();
+      ctx.moveTo(dropX, dropY);
+      ctx.lineTo(dropX, dropY + dropLength);
+      ctx.strokeStyle = 'rgba(174, 194, 224, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  drawWolf(ctx, x, y, w, h, t) {
+    ctx.fillStyle = '#333';
+    ctx.fillRect(x, y, w, h * 0.6);
+
+    ctx.fillStyle = '#666';
+    ctx.fillRect(x + w * 0.3, y + h * 0.6, w * 0.4, h * 0.2);
+
+    ctx.fillStyle = '#333';
+    ctx.font = 'bold 8px "Inter"';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'top';
+    ctx.fillText('🐺', x + w * 0.5, y + h * 0.8);
+  }
+
+  drawFire(ctx, x, y, w, h, t, params) {
+    for (let i = 0; i < 20; i++) {
+      ctx.fillStyle = `rgb(${255 - i * 10}, ${Math.max(0, 150 - i * 8)}, ${Math.max(0, 50 - i * 2)})`;
+      const flameX = x + Math.random() * w;
+      const flameH = Math.random() * 30 + 10;
+      ctx.fillRect(flameX, y - flameH, 5, flameH);
+    }
+  }
+
+  drawElement(ctx, x, y, w, h, params) {
+    ctx.fillStyle = 'rgba(108, 99, 255, 0.3)';
+    ctx.fillRect(x, y, w, h);
+    ctx.strokeStyle = 'rgba(108, 99, 255, 0.6)';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x, y, w, h);
+  }
+
+  renderWeatherEffects(ctx, W, H, t) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
+    ctx.font = '12px "Inter"';
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'top';
+    ctx.fillText(`D∗${t.toFixed(2).replace('.', '')}`, W - 10, 20);
+  }
+
   wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-    const words = text.split(' ');
+    const words = text.split(/\s+/);
     let line = '';
     let currentY = y;
     for (const word of words) {
+      if (!word) continue;
+      const test = line ? line + ' ' + word : word;
+      if (ctx.measureText(test).width > maxWidth && line) {
+        ctx.fillText(line, x, currentY);
+        line = word;
+        currentY += lineHeight;
+      } else {
+        line = test;
+      }
+    }
+    if (line) ctx.fillText(line, x, currentY);
+  };
+
+  wrapText(ctx, text, x, y, maxWidth, lineHeight) {
+    // Handle Cyrillic and any other Unicode text
+    const words = text.split(/\s+/);
+    let line = '';
+    let currentY = y;
+    for (const word of words) {
+      if (!word) continue;
       const test = line ? line + ' ' + word : word;
       if (ctx.measureText(test).width > maxWidth && line) {
         ctx.fillText(line, x, currentY);
