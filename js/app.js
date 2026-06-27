@@ -228,7 +228,7 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
 
     const frames = [];
 
-    const actionScene = this.parseActionPrompt(prompt);
+    const actionScene = this.parseActionPrompt(prompt, W, H);
 
     for (let f = 0; f < totalFrames; f++) {
       const t = totalFrames > 1 ? f / (totalFrames - 1) : 0;
@@ -290,7 +290,7 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
     });
   }
 
-  parseActionPrompt(prompt) {
+  parseActionPrompt(prompt, W, H) {
     const actions = [];
 
     const addAction = (type, x, y, w, h, params = {}) => {
