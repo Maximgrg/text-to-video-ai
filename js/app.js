@@ -523,24 +523,6 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
   }
 
   wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-    const words = text.split(/\s+/);
-    let line = '';
-    let currentY = y;
-    for (const word of words) {
-      if (!word) continue;
-      const test = line ? line + ' ' + word : word;
-      if (ctx.measureText(test).width > maxWidth && line) {
-        ctx.fillText(line, x, currentY);
-        line = word;
-        currentY += lineHeight;
-      } else {
-        line = test;
-      }
-    }
-    if (line) ctx.fillText(line, x, currentY);
-  };
-
-  wrapText(ctx, text, x, y, maxWidth, lineHeight) {
     // Handle Cyrillic and any other Unicode text
     const words = text.split(/\s+/);
     let line = '';
