@@ -1,3 +1,15 @@
+// =====================
+// Global Error Handler - Prevents page reload on unhandled promise rejections
+// =====================
+window.addEventListener('unhandledrejection', function (e) {
+  console.error('[FATAL] Unhandled Promise Rejection:', e.reason);
+  e.preventDefault(); // Prevent browser from reloading page on unhandled rejection
+  // Optional: Show user-friendly message
+  // if (typeof app !== "undefined" && app.showToast) {
+  //   app.showToast('⚠️', 'Произошла ошибка. Обратите в консоль для деталей.');
+  // }
+});
+
 class VideoForgeApp {
   constructor() {
     this.form = document.getElementById('generateForm');
@@ -398,7 +410,15 @@ class VideoForgeApp {
         }
 
         const t = totalFrames > 1 ? frameIndex / (totalFrames - 1) : 0;
-        this.renderScene(ctx, W, H, scene, t, frameIndex, totalFrames, duration);
+        try {
+          this.renderScene(ctx, W, H, scene, t, frameIndex, totalFrames, duration);
+        } catch (renderErr) {
+          console.error('Render error at frame', frameIndex, renderErr);
+          clearTimeout(safetyTimeout);
+          this.stopAudio(audioCtx, audioNodes);
+          reject(new Error('Ошибка рендера видео: ' + (renderErr.message || 'неизвестно')));
+          return;
+        }
         frameIndex++;
 
         if (frameIndex % fps === 0 || frameIndex === totalFrames) {
