@@ -428,23 +428,23 @@ class VideoForgeApp {
     const lower = prompt.toLowerCase();
 
     let scene = {
-      theme: 'night',
+      theme: 'sunset',
       colors: {
-        sky: ['#0a0a2e', '#1a1a4e', '#0d0d2a'],
-        accent: '#6c63ff',
-        accent2: '#e040fb',
-        ground: '#1a1a2e',
+        sky: ['#0a0a2e', '#ff6b35', '#ff4500', '#ffd700'],
+        accent: '#ff6b35',
+        accent2: '#ff4500',
+        ground: '#2d1a0a',
       },
-      elements: ['stars', 'waves'],
-      particles: 'stars',
-      particleCount: 80,
-      wind: 0.3,
+      elements: ['sun', 'clouds', 'birds', 'ocean_reflection'],
+      particles: 'fireflies',
+      particleCount: 40,
+      wind: 0.2,
     };
 
     const themes = [
       {
         name: 'sunset',
-        keywords: ['закат', 'закат солнца', 'вечер', 'солнце садится', 'сумерки', 'sunset', 'dusk'],
+        keywords: ['закат', 'закат солнца', 'вечер', 'солнце садится', 'сумерки', 'sunset', 'dusk', 'красное небо', 'orange sky', 'golden hour'],
         config: {
           colors: { sky: ['#1a0a2e', '#ff6b35', '#ff4500', '#ffd700'], accent: '#ff6b35', accent2: '#ff4500', ground: '#2d1a0a' },
           elements: ['sun', 'clouds', 'birds', 'ocean_reflection'],
@@ -466,7 +466,7 @@ class VideoForgeApp {
       },
       {
         name: 'ocean',
-        keywords: ['море', 'океан', 'волн', 'пляж', 'побережье', 'вода', 'волна', 'ocean', 'sea', 'beach', 'wave'],
+        keywords: ['море', 'океан', 'волн', 'пляж', 'побережье', 'вода', 'волна', 'ocean', 'sea', 'beach', 'wave', 'deep blue', 'aquatic', 'underwater'],
         config: {
           colors: { sky: ['#0a1a3e', '#0077be', '#00bfff', '#87ceeb'], accent: '#00bfff', accent2: '#0077be', ground: '#1a3a5e' },
           elements: ['waves', 'clouds', 'seagulls', 'ships'],
@@ -477,7 +477,7 @@ class VideoForgeApp {
       },
       {
         name: 'forest',
-        keywords: ['лес', 'дерев', 'природа', 'зелень', 'трава', 'роща', 'бор', 'forest', 'tree', 'wood'],
+        keywords: ['лес', 'дерев', 'природа', 'зелень', 'трава', 'роща', 'бор', 'forest', 'tree', 'wood', 'woodland', 'enchanted forest', 'green forest', 'jungle'],
         config: {
           colors: { sky: ['#0a1a0a', '#1a4a1a', '#2d6b2d', '#4a8a4a'], accent: '#4caf50', accent2: '#8bc34a', ground: '#1a2a0a' },
           elements: ['trees', 'fireflies', 'leaves'],
@@ -488,7 +488,7 @@ class VideoForgeApp {
       },
       {
         name: 'space',
-        keywords: ['космос', 'вселенная', 'звезд', 'галактик', 'планет', 'ракет', 'space', 'galaxy', 'universe', 'planet'],
+        keywords: ['космос', 'вселенная', 'звезд', 'галактик', 'планет', 'ракет', 'space', 'galaxy', 'universe', 'planet', 'starry night', 'nebula', 'black hole', 'alien world'],
         config: {
           colors: { sky: ['#000011', '#0a0a2e', '#1a0a3e', '#0d002a'], accent: '#e040fb', accent2: '#7c4dff', ground: '#000011' },
           elements: ['nebula', 'planets', 'shooting_stars'],
@@ -499,7 +499,7 @@ class VideoForgeApp {
       },
       {
         name: 'mountain',
-        keywords: ['гор', 'холм', 'скал', 'вершин', 'mountain', 'peak', 'hill', 'mount'],
+        keywords: ['гор', 'холм', 'скал', 'вершин', 'mountain', 'peak', 'hill', 'mount', 'snowy peaks', 'rocky mountains', 'alps', 'himalayas'],
         config: {
           colors: { sky: ['#0a1a2e', '#2a3a5e', '#4a6a8e', '#8aacce'], accent: '#6a8aae', accent2: '#4a6a8e', ground: '#2a3a2a' },
           elements: ['mountains', 'clouds', 'birds', 'trees'],
@@ -510,7 +510,7 @@ class VideoForgeApp {
       },
       {
         name: 'city',
-        keywords: ['город', 'мегаполис', 'улиц', 'ночной город', 'небоскреб', 'city', 'urban', 'street', 'skyscraper'],
+        keywords: ['город', 'мегаполис', 'улиц', 'ночной город', 'небоскреб', 'city', 'urban', 'street', 'skyscraper', 'urban landscape', 'neon lights', 'cyberpunk city'],
         config: {
           colors: { sky: ['#0a0a1a', '#1a1a3e', '#2a2a5e', '#0d0d2a'], accent: '#ffab00', accent2: '#ff6d00', ground: '#1a1a2e' },
           elements: ['buildings', 'city_lights', 'rain', 'neon'],
@@ -521,7 +521,7 @@ class VideoForgeApp {
       },
       {
         name: 'desert',
-        keywords: ['пустын', 'песок', 'дюн', 'сахар', 'desert', 'sand', 'dune'],
+        keywords: ['пустын', 'песок', 'дюн', 'сахар', 'desert', 'sand', 'dune', 'sandy', 'canyon', 'sahara'],
         config: {
           colors: { sky: ['#1a0a00', '#8a5a2a', '#d4a04a', '#e8c06a'], accent: '#d4a04a', accent2: '#e8c06a', ground: '#8a5a2a' },
           elements: ['dunes', 'sun', 'heat_haze'],
@@ -532,7 +532,7 @@ class VideoForgeApp {
       },
       {
         name: 'snow',
-        keywords: ['снег', 'зим', 'сугроб', 'метел', 'снежинк', 'snow', 'winter', 'blizzard'],
+        keywords: ['снег', 'зим', 'сугроб', 'метел', 'снежинк', 'snow', 'winter', 'blizzard', 'icy', 'arctic'],
         config: {
           colors: { sky: ['#0a1a2e', '#4a6a8e', '#8aacce', '#c0d8f0'], accent: '#c0d8f0', accent2: '#ffffff', ground: '#2a3a4e' },
           elements: ['snow_ground', 'snowflakes', 'trees_snow'],
@@ -543,7 +543,7 @@ class VideoForgeApp {
       },
       {
         name: 'fantasy',
-        keywords: ['фэнтез', 'волшебн', 'магическ', 'замок', 'дракон', 'сказк', 'fantasy', 'magic', 'castle', 'dragon'],
+        keywords: ['фэнтез', 'волшебн', 'магическ', 'замок', 'дракон', 'сказк', 'fantasy', 'magic', 'castle', 'dragon', 'magic kingdom', 'mythical', 'elves', 'dwarves'],
         config: {
           colors: { sky: ['#0a002a', '#2a004a', '#4a006a', '#6a008a'], accent: '#e040fb', accent2: '#7c4dff', ground: '#1a003a' },
           elements: ['castle', 'sparkles', 'nebula', 'dragons'],
@@ -554,7 +554,7 @@ class VideoForgeApp {
       },
       {
         name: 'fire',
-        keywords: ['огонь', 'пожар', 'вулкан', 'плам', 'горящ', 'fire', 'flame', 'volcano', 'burning'],
+        keywords: ['огонь', 'пожар', 'вулкан', 'плам', 'горящ', 'fire', 'flame', 'volcano', 'burning', 'inferno', 'lava'],
         config: {
           colors: { sky: ['#1a0000', '#4a0000', '#8a1a00', '#d44000'], accent: '#ff4500', accent2: '#ff6b35', ground: '#2a0a00' },
           elements: ['fire', 'smoke', 'embers'],
@@ -565,7 +565,7 @@ class VideoForgeApp {
       },
       {
         name: 'rain',
-        keywords: ['дождь', 'ливень', 'гроз', 'туч', 'пасмур', 'rain', 'storm', 'thunder', 'cloudy'],
+        keywords: ['дождь', 'ливень', 'гроз', 'туч', 'пасмур', 'rain', 'storm', 'thunder', 'cloudy', 'stormy', 'rainy day'],
         config: {
           colors: { sky: ['#0a0a1a', '#1a1a2e', '#2a2a3e', '#3a3a4e'], accent: '#6868a8', accent2: '#9898c8', ground: '#1a1a2a' },
           elements: ['clouds', 'rain', 'puddles', 'lightning'],
@@ -576,13 +576,35 @@ class VideoForgeApp {
       },
       {
         name: 'spring',
-        keywords: ['весн', 'цвет', 'сад', 'бабочк', 'радуг', 'spring', 'flower', 'garden', 'butterfly', 'rainbow'],
+        keywords: ['весн', 'цвет', 'сад', 'бабочк', 'радуг', 'spring', 'flower', 'garden', 'butterfly', 'rainbow', 'blossom', 'flower field', 'vibrant'],
         config: {
           colors: { sky: ['#0a1a2e', '#4a8ace', '#ffb7c5', '#98fb98'], accent: '#ff69b4', accent2: '#98fb98', ground: '#2a5a2a' },
           elements: ['flowers', 'butterflies', 'clouds'],
           particles: 'petals',
           particleCount: 40,
           wind: 0.25,
+        }
+      },
+      {
+        name: 'cyberpunk',
+        keywords: ['киберпанк', 'неоновы', 'футуристическ', 'будущее', 'технологии', 'cyberpunk', 'neon', 'futuristic', 'dystopian', 'hologram'],
+        config: {
+          colors: { sky: ['#000014', '#140028', '#28003c', '#001428', '#00283c'], accent: '#00ffff', accent2: '#ff00ff', ground: '#000000' },
+          elements: ['buildings', 'neon', 'city_lights'],
+          particles: 'sparkles',
+          particleCount: 80,
+          wind: 0.3,
+        }
+      },
+      {
+        name: 'retro',
+        keywords: ['ретро', '80е', '90е', 'винтаж', 'ретро-', 'retro', '80s', '90s', 'vintage', 'synthwave', 'outrun'],
+        config: {
+          colors: { sky: ['#140014', '#280028', '#3c003c', '#500050', '#640064'], accent: '#ff00ff', accent2: '#00ffff', ground: '#000000' },
+          elements: ['neon', 'grid'],
+          particles: 'sparkles',
+          particleCount: 50,
+          wind: 0.2,
         }
       },
     ];
@@ -592,7 +614,7 @@ class VideoForgeApp {
       let score = 0;
       for (const kw of theme.keywords) {
         if (lower.includes(kw)) {
-          score += kw.length;
+          score += kw.length * 2;
         }
       }
       if (score > bestScore) {
