@@ -313,7 +313,7 @@ class VideoForgeApp {
   // Local canvas-based video generation (fallback when no AI API)
   // ============================================================
 
-  async generateVideo(prompt, duration) {
+  async generateVideo(prompt, duration, audioEnabled = true) {
     const MediaRecorderClass = window.MediaRecorder;
 
     if (typeof MediaRecorderClass === 'undefined') {
@@ -322,6 +322,10 @@ class VideoForgeApp {
 
     if (!HTMLCanvasElement.prototype.captureStream) {
       throw new Error('Canvas.captureStream не поддерживается в вашем браузере');
+    }
+
+    if (duration > 120) {
+      this.showToast('⚠️', 'Видео длиннее 2 минут может создаваться долго. Пожалуйста, подождите.');
     }
 
     const fps = 24;
@@ -346,72 +350,284 @@ class VideoForgeApp {
     const recorder = new MediaRecorderClass(stream, { mimeType });
     const chunks = [];
 
-    recorder.ondataavailable = (e) => {
-      if (e.data.size > 0) chunks.push(e.data);
-    };
-
     const scene = this.analyzeScene(prompt, W, H);
 
-    const frames = [];
-
-    for (let f = 0; f < totalFrames; f++) {
-      const t = totalFrames > 1 ? f / (totalFrames - 1) : 0;
-      this.renderScene(ctx, W, H, scene, t, f, totalFrames, duration);
-      frames.push(ctx.getImageData(0, 0, W, H));
-
-      if (f % 24 === 0 || f === totalFrames - 1) {
-        this.updateTips([
-          '🎨 Рендеринг кадров (' + Math.round(f / totalFrames * 100) + '%)',
-          '🖼️ ' + (f + 1) + '/' + totalFrames,
-          '⏳ Продолжаем...'
-        ]);
+    let audioCtx = null;
+    let audioNodes = [];
+    if (audioEnabled && (typeof AudioContext !== 'undefined' || typeof webkitAudioContext !== 'undefined')) {
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        audioNodes = this.generateAudio(audioCtx, scene, duration);
+      } catch (e) {
+        console.warn('Audio generation failed:', e);
       }
     }
-
-    this.updateTips([
-      '🎬 Сборка видео...',
-      '⚙️ Кодирование',
-      '⏳ Финальный этап'
-    ]);
 
     return new Promise((resolve, reject) => {
       let frameIndex = 0;
       let safetyTimeout;
 
-      function renderFrame() {
-        if (frameIndex < frames.length) {
-          ctx.putImageData(frames[frameIndex], 0, 0);
-          frameIndex++;
-          setTimeout(renderFrame, 1000 / fps);
-        } else {
-          clearTimeout(safetyTimeout);
-          if (recorder.state !== 'inactive') {
-            recorder.stop();
-          }
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          resolve({ blob });
-        }
-      }
-
-      function stopRecording() {
-        clearTimeout(safetyTimeout);
-        setTimeout(() => {
-          if (recorder.state !== 'inactive') {
-            recorder.stop();
-          }
-        }, 100);
-      }
+      recorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
 
       recorder.onerror = (e) => {
         clearTimeout(safetyTimeout);
+        this.stopAudio(audioCtx, audioNodes);
         console.error('Recorder error:', e);
         reject(new Error('Ошибка MediaRecorder'));
       };
 
+      function finish() {
+        clearTimeout(safetyTimeout);
+        if (recorder.state !== 'inactive') {
+          recorder.stop();
+        }
+      }
+
+      recorder.onstop = () => {
+        this.stopAudio(audioCtx, audioNodes);
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        resolve({ blob });
+      };
+
+      function renderFrame() {
+        if (frameIndex >= totalFrames) {
+          finish();
+          return;
+        }
+
+        const t = totalFrames > 1 ? frameIndex / (totalFrames - 1) : 0;
+        this.renderScene(ctx, W, H, scene, t, frameIndex, totalFrames, duration);
+        frameIndex++;
+
+        if (frameIndex % fps === 0 || frameIndex === totalFrames) {
+          const progress = Math.round(frameIndex / totalFrames * 100);
+          const elapsed = Math.floor(frameIndex / fps);
+          const remaining = duration - elapsed;
+          this.updateTips([
+            '🎨 Рендеринг: ' + progress + '%',
+            '🖼️ ' + frameIndex + '/' + totalFrames + ' кадров',
+            '⏳ Осталось ~' + remaining + 'с'
+          ]);
+        }
+
+        setTimeout(renderFrame.bind(this), 1000 / fps);
+      }
+
       recorder.start(1000 / fps);
-      safetyTimeout = setTimeout(stopRecording, (totalFrames + 10) * 1000 / fps);
-      setTimeout(renderFrame, 10);
+      safetyTimeout = setTimeout(() => finish(), (totalFrames + 30) * 1000 / fps);
+      setTimeout(renderFrame.bind(this), 10);
     });
+  }
+
+  // ============================================================
+  // Audio Generation — ambient sounds per scene
+  // ============================================================
+
+  generateAudio(audioCtx, scene, duration) {
+    const nodes = [];
+    const durationSec = duration;
+
+    const masterGain = audioCtx.createGain();
+    masterGain.gain.value = 0.3;
+    masterGain.connect(audioCtx.destination);
+    nodes.push(masterGain);
+
+    const theme = scene.theme;
+
+    const drone = this.createDrone(audioCtx, scene, durationSec);
+    if (drone) {
+      drone.connect(masterGain);
+      nodes.push(drone);
+    }
+
+    switch (theme) {
+      case 'ocean':
+      case 'sunset':
+      case 'sunrise':
+        this.createWaveSound(audioCtx, masterGain, durationSec);
+        break;
+      case 'rain':
+      case 'city':
+        this.createRainSound(audioCtx, masterGain, durationSec);
+        break;
+      case 'forest':
+      case 'spring':
+        this.createBirdSound(audioCtx, masterGain, durationSec);
+        break;
+      case 'fire':
+        this.createFireSound(audioCtx, masterGain, durationSec);
+        break;
+      case 'mountain':
+      case 'snow':
+        this.createWindSound(audioCtx, masterGain, durationSec);
+        break;
+      default:
+        break;
+    }
+
+    return nodes;
+  }
+
+  createDrone(audioCtx, scene, duration) {
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.08;
+    gain.gain.setValueAtTime(0, audioCtx.currentTime);
+    gain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 1);
+
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    const freqMap = {
+      'ocean': 80, 'sunset': 120, 'sunrise': 140, 'forest': 110,
+      'space': 50, 'mountain': 90, 'city': 100, 'desert': 95,
+      'snow': 85, 'fantasy': 70, 'fire': 65, 'rain': 75,
+      'spring': 130, 'night': 55, 'cyberpunk': 60, 'retro': 65,
+    };
+    osc.frequency.value = freqMap[scene.theme] || 100;
+
+    const lfo = audioCtx.createOscillator();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.5;
+
+    const lfoGain = audioCtx.createGain();
+    lfoGain.gain.value = 5;
+
+    lfo.connect(lfoGain);
+    lfoGain.connect(osc.frequency);
+    lfo.start();
+    lfo.stop(audioCtx.currentTime + duration);
+
+    osc.connect(gain);
+    osc.start();
+    osc.stop(audioCtx.currentTime + duration);
+
+    const osc2 = audioCtx.createOscillator();
+    osc2.type = 'sine';
+    osc2.frequency.value = osc.frequency.value * 2;
+    const gain2 = audioCtx.createGain();
+    gain2.gain.value = 0.03;
+    osc2.connect(gain2);
+    gain2.connect(gain);
+    osc2.start();
+    osc2.stop(audioCtx.currentTime + duration);
+
+    return gain;
+  }
+
+  createWaveSound(audioCtx, dest, duration) {
+    const bufferSize = audioCtx.sampleRate * 2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      const t = i / audioCtx.sampleRate;
+      const noise = (Math.random() * 2 - 1);
+      const waveEnv = Math.max(0, Math.sin(t * 0.15)) * Math.max(0, Math.sin(t * 0.08 + 0.5));
+      data[i] = noise * waveEnv * 0.3;
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.12;
+    source.connect(gain);
+    gain.connect(dest);
+    source.start();
+    source.stop(audioCtx.currentTime + duration);
+  }
+
+  createRainSound(audioCtx, dest, duration) {
+    const bufferSize = audioCtx.sampleRate * 3;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.4;
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'highpass';
+    filter.frequency.value = 1000;
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.15;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+    source.start();
+    source.stop(audioCtx.currentTime + duration);
+  }
+
+  createBirdSound(audioCtx, dest, duration) {
+    const chirpCount = Math.floor(duration / 3);
+    for (let i = 0; i < chirpCount; i++) {
+      const startTime = audioCtx.currentTime + 2 + i * 3 + Math.random() * 1.5;
+      const chirpDur = 0.15 + Math.random() * 0.1;
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(1500 + Math.random() * 1000, startTime);
+      osc.frequency.exponentialRampToValueAtTime(2000 + Math.random() * 1500, startTime + chirpDur);
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(0.06, startTime + 0.02);
+      gain.gain.linearRampToValueAtTime(0, startTime + chirpDur);
+      osc.connect(gain);
+      gain.connect(dest);
+      osc.start(startTime);
+      osc.stop(startTime + chirpDur);
+    }
+  }
+
+  createFireSound(audioCtx, dest, duration) {
+    const bufferSize = audioCtx.sampleRate * 1;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * 0.6;
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 800;
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.08;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+    source.start();
+    source.stop(audioCtx.currentTime + duration);
+  }
+
+  createWindSound(audioCtx, dest, duration) {
+    const bufferSize = audioCtx.sampleRate * 2;
+    const buffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      const t = i / audioCtx.sampleRate;
+      data[i] = (Math.random() * 2 - 1) * (0.5 + 0.5 * Math.sin(t * 0.08));
+    }
+    const source = audioCtx.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.value = 300;
+    filter.Q.value = 0.5;
+    const gain = audioCtx.createGain();
+    gain.gain.value = 0.1;
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(dest);
+    source.start();
+    source.stop(audioCtx.currentTime + duration);
+  }
+
+  stopAudio(audioCtx, nodes) {
+    if (audioCtx && audioCtx.state !== 'closed') {
+      try { audioCtx.close(); } catch (e) {}
+    }
   }
 
   // ============================================================
@@ -604,6 +820,10 @@ class VideoForgeApp {
     ];
 
     let bestScore = 0;
+    let bestTheme = null;
+    let secondBestScore = 0;
+    let secondBestTheme = null;
+
     for (const theme of themes) {
       let score = 0;
       for (const kw of theme.keywords) {
@@ -612,15 +832,81 @@ class VideoForgeApp {
         }
       }
       if (score > bestScore) {
+        secondBestScore = bestScore;
+        secondBestTheme = bestTheme;
         bestScore = score;
-        scene = {
-          theme: theme.name,
-          ...theme.config,
-        };
+        bestTheme = theme;
+      } else if (score > secondBestScore) {
+        secondBestScore = score;
+        secondBestTheme = theme;
+      }
+    }
+
+    if (bestTheme) {
+      scene = {
+        theme: bestTheme.name,
+        ...bestTheme.config,
+      };
+
+      if (secondBestTheme && secondBestScore > bestScore * 0.6) {
+        for (const el of secondBestTheme.config.elements) {
+          if (!scene.elements.includes(el)) {
+            scene.elements.push(el);
+          }
+        }
+        const sky1 = bestTheme.config.colors.sky;
+        const sky2 = secondBestTheme.config.colors.sky;
+        scene.colors.sky = sky1.map((c, i) => {
+          if (i >= sky2.length) return c;
+          const c1 = this.hexToRgb(c);
+          const c2 = this.hexToRgb(sky2[i]);
+          if (!c1 || !c2) return c;
+          const mr = Math.floor(c1.r * 0.6 + c2.r * 0.4);
+          const mg = Math.floor(c1.g * 0.6 + c2.g * 0.4);
+          const mb = Math.floor(c1.b * 0.6 + c2.b * 0.4);
+          return '#' + [mr, mg, mb].map(v => Math.min(255, Math.max(0, v)).toString(16).padStart(2, '0')).join('');
+        });
+      }
+    }
+
+    const objectMap = {
+      'корабль|лодка|корабли|судно|ship|boat|sailboat': 'ships',
+      'птиц|птица|чайк|bird|seagull': 'birds',
+      'дракон|dragon': 'dragons',
+      'замок|castle|крепость': 'castle',
+      'цвет|цветы|flower|blossom': 'flowers',
+      'бабочк|butterfly|бабочка': 'butterflies',
+      'радуг|rainbow': 'neon',
+      'неон|neon': 'neon',
+      'дерев|tree|лес': 'trees',
+      'звезд|star|star': 'stars',
+      'облак|облач|cloud|туч': 'clouds',
+      'лун|moon': 'stars',
+      'огонь|fire|пламя|костер': 'fire',
+      'снег|snow|зим': 'snowflakes',
+      'дождь|rain|ливень': 'rain',
+      'гор|mountain|скал': 'mountains',
+      'волн|wave|море|ocean': 'waves',
+    };
+
+    for (const [pattern, element] of Object.entries(objectMap)) {
+      if (new RegExp(pattern, 'i').test(prompt)) {
+        if (!scene.elements.includes(element)) {
+          scene.elements.push(element);
+        }
       }
     }
 
     return scene;
+  }
+
+  hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? {
+      r: parseInt(result[1], 16),
+      g: parseInt(result[2], 16),
+      b: parseInt(result[3], 16)
+    } : null;
   }
 
   // ============================================================
