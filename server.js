@@ -32,11 +32,9 @@ const upload = multer({
 });
 
 function ensureCivitaiKey(req, res, next) {
-  if (process.env.USE_CIVITAI === 'true' && !CIVITAI_API_KEY) {
-    return res.status(400).json({
-      error: 'API ключ Civitai не настроен',
-      message: 'Пожалуйста, создайте файл .env и укажите CIVITAI_API_KEY. Получить ключ: https://civitai.com'
-    });
+  // If USE_CIVITAI=true but no API key, still allow local generation as fallback
+  if (process.env.USE_CIVITAI === 'true' && (!CIVITAI_API_KEY || CIVITAI_API_KEY === 'your_civitai_api_key_here')) {
+    console.warn('[Civitai] USE_CIVITAI=true но API ключ не настроен. Используется локальная генерация.');
   }
   next();
 }
@@ -44,6 +42,20 @@ function ensureCivitaiKey(req, res, next) {
 // ============================
 // API Routes
 // ============================
+
+// Получить статус сервера и режима генерации
+app.get('/api/status', (req, res) => {
+  const aiMode = process.env.USE_CIVITAI === 'true';
+  res.json({
+    aiMode,
+    apiKeyConfigured: aiMode && !!CIVITAI_API_KEY && CIVITAI_API_KEY !== 'your_civitai_api_key_here',
+    mode: aiMode ? 'civitai' : 'local',
+    message: aiMode
+      ? '🎬 Режим AI-генерации через Civitai API'
+      : '🎬 Режим локальной генерации',
+    setupUrl: 'https://civitai.com/user/account'
+  });
+});
 
 // Получить статус использования
 app.get('/api/usage', (req, res) => {
@@ -109,8 +121,8 @@ app.post('/api/generate', ensureCivitaiKey, upload.single('image'), async (req, 
     // Инкрементируем счётчик использования
     storage.incrementUsage();
 
-    if (process.env.USE_CIVITAI === 'true') {
-      // Отправляем задачу в Civitai
+    if (process.env.USE_CIVITAI === 'true' && CIVITAI_API_KEY && CIVITAI_API_KEY !== 'your_civitai_api_key_here') {
+      // Отправляем задачу в Civitai AI
       generateVideoWithCivitai(jobId, prompt.trim(), imagePath, duration);
 
       res.json({
@@ -336,6 +348,20 @@ async function pollCivitaiJob(jobId, remoteId, retries = 12) {
   }
 }
 
+// ============================
+// Запуск polling для активных задач при старте
+// ============================
+
+function resumePendingJobs() {
+  const jobs = storage.getJobs(100);
+  for (const job of jobs) {
+    if (job.status === 'processing' && job.remoteId) {
+      console.log(`[Resume] Возобновляем проверку задачи ${job.id} (remote: ${job.remoteId})`);
+      setTimeout(() => pollCivitaiJob(job.id, job.remoteId), 5000);
+    }
+  }
+}
+
 // Создаём папки для данных и загрузок
 const fs = require('fs');
 const dirs = ['data', 'uploads', 'videos'];
@@ -363,11 +389,19 @@ app.listen(PORT, '0.0.0.0', () => {
 ║     Откройте: http://localhost:${PORT}             ║
 ╚══════════════════════════════════════════════════╝
   `);
-  if (process.env.USE_CIVITAI === 'true' && !CIVITAI_API_KEY) {
-    console.warn('⚠️  USE_CIVITAI=true но CIVITAI_API_KEY не настроен!');
-    console.warn('   Отредактируйте файл .env и укажите ваш API ключ от https://civitai.com');
+  
+  if (process.env.USE_CIVITAI === 'true') {
+    if (CIVITAI_API_KEY && CIVITAI_API_KEY !== 'your_civitai_api_key_here') {
+      console.log('🤖 Режим: Civitai AI API (настоящая AI-генерация видео)');
+      resumePendingJobs();
+    } else {
+      console.warn('⚠️  USE_CIVITAI=true но CIVITAI_API_KEY не настроен!');
+      console.warn('   Получите бесплатный API ключ: https://civitai.com/user/account');
+      console.warn('   Затем отредактируйте файл .env');
+    }
   } else {
-    console.log('🔧 Режим: Локальная генерация (ffmpeg)');
-    console.log('   Чтобы использовать Civitai API, установите USE_CIVITAI=true в .env');
+    console.log('🔧 Режим: Локальная генерация (canvas/Jimp + ffmpeg)');
+    console.log('   Чтобы использовать Civitai AI API, установите USE_CIVITAI=true в .env');
+    console.log('   и укажите CIVITAI_API_KEY (получить: https://civitai.com/user/account)');
   }
 });

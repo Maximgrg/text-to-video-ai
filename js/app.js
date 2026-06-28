@@ -30,7 +30,9 @@ class VideoForgeApp {
 
     this.db = null;
     this.videoUrls = {};
+    this.serverVideos = {};
     this.totalGenerated = 0;
+    this.serverMode = null;
     this.init();
   }
 
@@ -38,6 +40,7 @@ class VideoForgeApp {
     this.initDB();
     this.loadUsage();
     this.loadHistory();
+    this.checkServerMode();
     this.bindEvents();
   }
 
@@ -59,7 +62,7 @@ class VideoForgeApp {
 
   bindEvents() {
     this.promptInput.addEventListener('input', () => {
-      this.promptCounter.textContent = `${this.promptInput.value.length} символов`;
+      this.promptCounter.textContent = this.promptInput.value.length + ' символов';
     });
 
     this.imageInput.addEventListener('change', (e) => {
@@ -85,7 +88,7 @@ class VideoForgeApp {
       e.preventDefault();
       console.log('🔄 Form submitted, generating video...');
       if (!this.promptInput.value.trim()) {
-        this.showToast('\u274C', 'Please enter some text');
+        this.showToast('❌', 'Please enter some text');
         return;
       }
       this.handleGenerate(e);
@@ -104,9 +107,9 @@ class VideoForgeApp {
     const remaining = Math.max(0, freeLimit - usage.count);
     const percent = Math.min((usage.count / freeLimit) * 100, 100);
 
-    this.usageText.textContent = `\u{1F4CA} ${remaining}/${freeLimit}`;
-    this.usageCounter.textContent = `${usage.count} / ${freeLimit}`;
-    this.usageProgressFill.style.width = `${percent}%`;
+    this.usageText.textContent = '📊 ' + remaining + '/' + freeLimit;
+    this.usageCounter.textContent = usage.count + ' / ' + freeLimit;
+    this.usageProgressFill.style.width = percent + '%';
   }
 
   checkUsage() {
@@ -117,7 +120,7 @@ class VideoForgeApp {
       usage = { date: today, count: 0 };
     }
     if (usage.count >= 10) {
-      this.showToast('\u{274C}', `Лимит исчерпан (10/10). Приобретите подписку!`);
+      this.showToast('❌', 'Лимит исчерпан (10/10). Приобретите подписку!');
       return false;
     }
     return true;
@@ -134,11 +137,25 @@ class VideoForgeApp {
     localStorage.setItem('vf_usage', JSON.stringify(usage));
   }
 
+  async checkServerMode() {
+    try {
+      const resp = await fetch('/api/status');
+      if (resp.ok) {
+        const data = await resp.json();
+        this.serverMode = data.aiMode && data.apiKeyConfigured ? 'ai' : 'local';
+        console.log('Server mode:', this.serverMode, '-', data.message);
+      }
+    } catch (e) {
+      console.log('Server not available, using local generation');
+      this.serverMode = 'local';
+    }
+  }
+
   async handleGenerate(e) {
     e.preventDefault();
     const prompt = this.promptInput.value.trim();
     if (!prompt || prompt.length < 3) {
-      this.showToast('\u{274C}', 'Введите описание видео (минимум 3 символа)');
+      this.showToast('❌', 'Введите описание видео (минимум 3 символа)');
       return;
     }
     if (!this.checkUsage()) return;
@@ -148,34 +165,142 @@ class VideoForgeApp {
     this.showStatus('pending');
 
     const duration = parseInt(this.durationSelect.value);
+    const imageFile = this.imageInput.files[0];
     const jobId = 'vid_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
 
     try {
-      this.updateTips([
-        '\u{1F3A8} ИИ анализирует запрос',
-        '\u{1F3AC} Генерирует кадры',
-        '\u{1F4A5} Собирает видео'
-      ]);
+      if (this.serverMode === 'ai') {
+        this.updateTips([
+          '🤖 Civitai AI генерирует видео...',
+          '⏳ Обычно 1-2 минуты',
+          '🔍 Отслеживаем статус'
+        ]);
 
-      const result = await this.generateVideo(prompt, duration);
+        const videoUrl = await this.generateViaServer(prompt, duration, imageFile);
 
-      await this.saveVideo(jobId, prompt, duration, result.blob);
-      this.incrementUsage();
-      this.loadUsage();
+        this.incrementUsage();
+        this.loadUsage();
 
-      const url = URL.createObjectURL(result.blob);
-      this.videoUrls[jobId] = url;
-      this.showStatus('completed', url);
-      await this.loadHistory();
-      this.showToast('\u2705', 'Видео готово!');
+        this.serverVideos[jobId] = videoUrl;
+        this.showStatus('completed', videoUrl);
+        await this.loadHistory();
+        this.showToast('✅', 'AI видео готово!');
+      } else {
+        this.updateTips([
+          '🎨 Рендеринг сцены...',
+          '🎬 Генерирует кадры',
+          '💥 Собирает видео'
+        ]);
+
+        const result = await this.generateVideo(prompt, duration);
+
+        await this.saveVideo(jobId, prompt, duration, result.blob);
+        this.incrementUsage();
+        this.loadUsage();
+
+        const url = URL.createObjectURL(result.blob);
+        this.videoUrls[jobId] = url;
+        this.showStatus('completed', url);
+        await this.loadHistory();
+        this.showToast('✅', 'Видео готово!');
+      }
     } catch (err) {
       console.error('Generation error:', err);
+
+      if (this.serverMode === 'ai') {
+        console.log('Server AI failed, falling back to local...');
+        this.serverMode = 'local';
+        try {
+          this.updateTips([
+            '🔄 Переключаюсь на локальную генерацию...',
+            '🎨 Рендеринг сцены',
+            '💥 Собираем видео'
+          ]);
+
+          const result = await this.generateVideo(prompt, duration);
+          await this.saveVideo(jobId, prompt, duration, result.blob);
+          this.incrementUsage();
+          this.loadUsage();
+
+          const url = URL.createObjectURL(result.blob);
+          this.videoUrls[jobId] = url;
+          this.showStatus('completed', url);
+          await this.loadHistory();
+          this.showToast('✅', 'Видео готово (локально)!');
+          return;
+        } catch (fallbackErr) {
+          err = fallbackErr;
+        }
+      }
+
       this.showStatus('failed', err.message || 'Неизвестная ошибка');
-      this.showToast('\u{274C}', 'Ошибка генерации');
+      this.showToast('❌', 'Ошибка генерации');
     } finally {
       this.generateBtn.classList.remove('loading');
       this.generateBtn.disabled = false;
     }
+  }
+
+  async generateViaServer(prompt, duration, imageFile) {
+    const formData = new FormData();
+    formData.append('prompt', prompt);
+    formData.append('duration', String(duration));
+    if (imageFile) {
+      formData.append('image', imageFile);
+    }
+
+    const resp = await fetch('/api/generate', {
+      method: 'POST',
+      body: formData
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({}));
+      throw new Error(err.error || err.message || 'Server error (' + resp.status + ')');
+    }
+
+    const data = await resp.json();
+
+    if (!data.jobId) {
+      throw new Error('Server did not return a job ID');
+    }
+
+    const maxAttempts = 120;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      await new Promise(r => setTimeout(r, 1000));
+
+      const statusResp = await fetch('/api/jobs/' + data.jobId);
+      if (!statusResp.ok) continue;
+
+      const statusData = await statusResp.json();
+      const job = statusData.job;
+
+      if (!job) continue;
+
+      if (job.status === 'completed' && job.videoUrl) {
+        this.updateTips([
+          '✅ Видео готово!',
+          '🎬 Загружаем результат...',
+          '✨ Отлично!'
+        ]);
+        return job.videoUrl;
+      }
+
+      if (job.status === 'failed') {
+        throw new Error(job.error || 'Ошибка генерации видео на сервере');
+      }
+
+      if (attempt % 10 === 0) {
+        const seconds = Math.floor(attempt / 2);
+        this.updateTips([
+          '🤖 AI генерирует видео...',
+          '⏳ Прошло ' + seconds + 'с',
+          '🔍 Ждём результат'
+        ]);
+      }
+    }
+
+    throw new Error('Превышено время ожидания генерации видео');
   }
 
   updateTips(tips) {
@@ -184,10 +309,13 @@ class VideoForgeApp {
     if (this.tip3) this.tip3.textContent = tips[2] || '';
   }
 
+  // ============================================================
+  // Local canvas-based video generation (fallback when no AI API)
+  // ============================================================
+
   async generateVideo(prompt, duration) {
-    const navigator = window.navigator;
     const MediaRecorderClass = window.MediaRecorder;
-    
+
     if (typeof MediaRecorderClass === 'undefined') {
       throw new Error('MediaRecorder не поддерживается вашим браузером');
     }
@@ -196,27 +324,25 @@ class VideoForgeApp {
       throw new Error('Canvas.captureStream не поддерживается в вашем браузере');
     }
 
-    const fps = 10;
+    const fps = 24;
     const totalFrames = duration * fps;
     const W = 1280;
     const H = 720;
 
-const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
+    const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
       ? 'video/webm;codecs=vp9'
       : MediaRecorderClass.isTypeSupported('video/webm;codecs=vp8')
         ? 'video/webm;codecs=vp8'
         : MediaRecorderClass.isTypeSupported('video/webm')
           ? 'video/webm'
-          : (console.warn('⚠️ Поддерживается только кодировка VP9 или VP8. Запись будет некачественной'), 'video/webm');
+          : 'video/webm';
 
     const canvas = document.createElement('canvas');
     canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext('2d');
-    ctx.imageSmoothingEnabled = false;
 
     const stream = canvas.captureStream(fps);
-
     const recorder = new MediaRecorderClass(stream, { mimeType });
     const chunks = [];
 
@@ -224,35 +350,33 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
       if (e.data.size > 0) chunks.push(e.data);
     };
 
-    recorder.onstop = () => {};
+    const scene = this.analyzeScene(prompt, W, H);
 
     const frames = [];
 
-    const actionScene = this.parseActionPrompt(prompt, W, H);
-
     for (let f = 0; f < totalFrames; f++) {
       const t = totalFrames > 1 ? f / (totalFrames - 1) : 0;
-      this.renderActionFrame(ctx, W, H, prompt, actionScene, t, f, totalFrames, duration);
+      this.renderScene(ctx, W, H, scene, t, f, totalFrames, duration);
       frames.push(ctx.getImageData(0, 0, W, H));
 
-      if (f % 10 === 0 || f === totalFrames - 1) {
+      if (f % 24 === 0 || f === totalFrames - 1) {
         this.updateTips([
-          '\u{1F3A8} Рендеринг кадров...',
-          `\u{1F5BC} ${f + 1}/${totalFrames}`,
-          '\u23F3 Продолжаем...'
+          '🎨 Рендеринг кадров (' + Math.round(f / totalFrames * 100) + '%)',
+          '🖼️ ' + (f + 1) + '/' + totalFrames,
+          '⏳ Продолжаем...'
         ]);
       }
     }
 
     this.updateTips([
-      '\u{1F3A5} Сборка видео...',
-      '\u2699\uFE0F Кодирование',
-      '\u23F3 Финальный этап'
+      '🎬 Сборка видео...',
+      '⚙️ Кодирование',
+      '⏳ Финальный этап'
     ]);
 
     return new Promise((resolve, reject) => {
       let frameIndex = 0;
-      let resolveTimeout;
+      let safetyTimeout;
 
       function renderFrame() {
         if (frameIndex < frames.length) {
@@ -260,6 +384,7 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
           frameIndex++;
           setTimeout(renderFrame, 1000 / fps);
         } else {
+          clearTimeout(safetyTimeout);
           if (recorder.state !== 'inactive') {
             recorder.stop();
           }
@@ -269,7 +394,7 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
       }
 
       function stopRecording() {
-        clearTimeout(resolveTimeout);
+        clearTimeout(safetyTimeout);
         setTimeout(() => {
           if (recorder.state !== 'inactive') {
             recorder.stop();
@@ -278,271 +403,934 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
       }
 
       recorder.onerror = (e) => {
-        clearTimeout(resolveTimeout);
+        clearTimeout(safetyTimeout);
         console.error('Recorder error:', e);
         reject(new Error('Ошибка MediaRecorder'));
       };
 
       recorder.start(1000 / fps);
-      resolveTimeout = setTimeout(stopRecording, (totalFrames + 10) * 1000 / fps);
-
+      safetyTimeout = setTimeout(stopRecording, (totalFrames + 10) * 1000 / fps);
       setTimeout(renderFrame, 10);
     });
   }
 
-  parseActionPrompt(prompt, W, H) {
-    const actions = [];
+  // ============================================================
+  // Scene Analysis
+  // ============================================================
 
-    const addAction = (type, x, y, w, h, params = {}) => {
-      actions.push({ type, x, y, w, h, params, startFrame: Date.now() });
+  analyzeScene(prompt, W, H) {
+    const lower = prompt.toLowerCase();
+
+    let scene = {
+      theme: 'night',
+      colors: {
+        sky: ['#0a0a2e', '#1a1a4e', '#0d0d2a'],
+        accent: '#6c63ff',
+        accent2: '#e040fb',
+        ground: '#1a1a2e',
+      },
+      elements: ['stars', 'waves'],
+      particles: 'stars',
+      particleCount: 80,
+      wind: 0.3,
     };
 
-    const lowerPrompt = prompt.toLowerCase();
+    const themes = [
+      {
+        name: 'sunset',
+        keywords: ['закат', 'закат солнца', 'вечер', 'солнце садится', 'сумерки', 'sunset', 'dusk'],
+        config: {
+          colors: { sky: ['#1a0a2e', '#ff6b35', '#ff4500', '#ffd700'], accent: '#ff6b35', accent2: '#ff4500', ground: '#2d1a0a' },
+          elements: ['sun', 'clouds', 'birds', 'ocean_reflection'],
+          particles: 'fireflies',
+          particleCount: 40,
+          wind: 0.2,
+        }
+      },
+      {
+        name: 'sunrise',
+        keywords: ['рассвет', 'восход', 'утро', 'солнце встает', 'sunrise', 'dawn'],
+        config: {
+          colors: { sky: ['#0a1a2e', '#ff8c42', '#ffd700', '#87ceeb'], accent: '#ff8c42', accent2: '#ffd700', ground: '#1a2a1a' },
+          elements: ['sun', 'clouds', 'birds'],
+          particles: 'fireflies',
+          particleCount: 30,
+          wind: 0.15,
+        }
+      },
+      {
+        name: 'ocean',
+        keywords: ['море', 'океан', 'волн', 'пляж', 'побережье', 'вода', 'волна', 'ocean', 'sea', 'beach', 'wave'],
+        config: {
+          colors: { sky: ['#0a1a3e', '#0077be', '#00bfff', '#87ceeb'], accent: '#00bfff', accent2: '#0077be', ground: '#1a3a5e' },
+          elements: ['waves', 'clouds', 'seagulls', 'ships'],
+          particles: 'sparkles',
+          particleCount: 30,
+          wind: 0.4,
+        }
+      },
+      {
+        name: 'forest',
+        keywords: ['лес', 'дерев', 'природа', 'зелень', 'трава', 'роща', 'бор', 'forest', 'tree', 'wood'],
+        config: {
+          colors: { sky: ['#0a1a0a', '#1a4a1a', '#2d6b2d', '#4a8a4a'], accent: '#4caf50', accent2: '#8bc34a', ground: '#1a2a0a' },
+          elements: ['trees', 'fireflies', 'leaves'],
+          particles: 'fireflies',
+          particleCount: 50,
+          wind: 0.2,
+        }
+      },
+      {
+        name: 'space',
+        keywords: ['космос', 'вселенная', 'звезд', 'галактик', 'планет', 'ракет', 'space', 'galaxy', 'universe', 'planet'],
+        config: {
+          colors: { sky: ['#000011', '#0a0a2e', '#1a0a3e', '#0d002a'], accent: '#e040fb', accent2: '#7c4dff', ground: '#000011' },
+          elements: ['nebula', 'planets', 'shooting_stars'],
+          particles: 'stars',
+          particleCount: 120,
+          wind: 0.05,
+        }
+      },
+      {
+        name: 'mountain',
+        keywords: ['гор', 'холм', 'скал', 'вершин', 'mountain', 'peak', 'hill', 'mount'],
+        config: {
+          colors: { sky: ['#0a1a2e', '#2a3a5e', '#4a6a8e', '#8aacce'], accent: '#6a8aae', accent2: '#4a6a8e', ground: '#2a3a2a' },
+          elements: ['mountains', 'clouds', 'birds', 'trees'],
+          particles: 'snow',
+          particleCount: 40,
+          wind: 0.3,
+        }
+      },
+      {
+        name: 'city',
+        keywords: ['город', 'мегаполис', 'улиц', 'ночной город', 'небоскреб', 'city', 'urban', 'street', 'skyscraper'],
+        config: {
+          colors: { sky: ['#0a0a1a', '#1a1a3e', '#2a2a5e', '#0d0d2a'], accent: '#ffab00', accent2: '#ff6d00', ground: '#1a1a2e' },
+          elements: ['buildings', 'city_lights', 'rain', 'neon'],
+          particles: 'rain',
+          particleCount: 60,
+          wind: 0.5,
+        }
+      },
+      {
+        name: 'desert',
+        keywords: ['пустын', 'песок', 'дюн', 'сахар', 'desert', 'sand', 'dune'],
+        config: {
+          colors: { sky: ['#1a0a00', '#8a5a2a', '#d4a04a', '#e8c06a'], accent: '#d4a04a', accent2: '#e8c06a', ground: '#8a5a2a' },
+          elements: ['dunes', 'sun', 'heat_haze'],
+          particles: 'dust',
+          particleCount: 30,
+          wind: 0.4,
+        }
+      },
+      {
+        name: 'snow',
+        keywords: ['снег', 'зим', 'сугроб', 'метел', 'снежинк', 'snow', 'winter', 'blizzard'],
+        config: {
+          colors: { sky: ['#0a1a2e', '#4a6a8e', '#8aacce', '#c0d8f0'], accent: '#c0d8f0', accent2: '#ffffff', ground: '#2a3a4e' },
+          elements: ['snow_ground', 'snowflakes', 'trees_snow'],
+          particles: 'snow',
+          particleCount: 80,
+          wind: 0.3,
+        }
+      },
+      {
+        name: 'fantasy',
+        keywords: ['фэнтез', 'волшебн', 'магическ', 'замок', 'дракон', 'сказк', 'fantasy', 'magic', 'castle', 'dragon'],
+        config: {
+          colors: { sky: ['#0a002a', '#2a004a', '#4a006a', '#6a008a'], accent: '#e040fb', accent2: '#7c4dff', ground: '#1a003a' },
+          elements: ['castle', 'sparkles', 'nebula', 'dragons'],
+          particles: 'sparkles',
+          particleCount: 80,
+          wind: 0.15,
+        }
+      },
+      {
+        name: 'fire',
+        keywords: ['огонь', 'пожар', 'вулкан', 'плам', 'горящ', 'fire', 'flame', 'volcano', 'burning'],
+        config: {
+          colors: { sky: ['#1a0000', '#4a0000', '#8a1a00', '#d44000'], accent: '#ff4500', accent2: '#ff6b35', ground: '#2a0a00' },
+          elements: ['fire', 'smoke', 'embers'],
+          particles: 'embers',
+          particleCount: 60,
+          wind: 0.3,
+        }
+      },
+      {
+        name: 'rain',
+        keywords: ['дождь', 'ливень', 'гроз', 'туч', 'пасмур', 'rain', 'storm', 'thunder', 'cloudy'],
+        config: {
+          colors: { sky: ['#0a0a1a', '#1a1a2e', '#2a2a3e', '#3a3a4e'], accent: '#6868a8', accent2: '#9898c8', ground: '#1a1a2a' },
+          elements: ['clouds', 'rain', 'puddles', 'lightning'],
+          particles: 'rain',
+          particleCount: 100,
+          wind: 0.6,
+        }
+      },
+      {
+        name: 'spring',
+        keywords: ['весн', 'цвет', 'сад', 'бабочк', 'радуг', 'spring', 'flower', 'garden', 'butterfly', 'rainbow'],
+        config: {
+          colors: { sky: ['#0a1a2e', '#4a8ace', '#ffb7c5', '#98fb98'], accent: '#ff69b4', accent2: '#98fb98', ground: '#2a5a2a' },
+          elements: ['flowers', 'butterflies', 'clouds'],
+          particles: 'petals',
+          particleCount: 40,
+          wind: 0.25,
+        }
+      },
+    ];
 
-    if (lowerPrompt.includes('закат') || lowerPrompt.includes('восход солнца')) {
-      addAction('sunset', 0, 0, W, H, { color: '#FF6B35', time: Math.random() * 0.8 });
-    }
-    if (lowerPrompt.includes('дождь') || lowerPrompt.includes('снег')) {
-      addAction('rain', 0, 0, W, H, { intensity: 20 });
-    }
-    if (lowerPrompt.includes('волн') || lowerPrompt.includes('океан')) {
-      addAction('wave', 0, H * 0.3, W, H * 0.5);
-    }
-    if (lowerPrompt.includes('волк') || lowerPrompt.includes('волч')) {
-      addAction('wolf', Math.random() * W * 0.8, Math.random() * H * 0.8, W * 0.15, H * 0.15);
-    }
-    if (lowerPrompt.includes('море') || lowerPrompt.includes('плыть')) {
-      addAction('boat', 0, H * 0.7, W * 0.8, H * 0.3);
-    }
-    if (lowerPrompt.includes('вулкан') || lowerPrompt.includes('огонь')) {
-      addAction('fire', 0, 0, W, H, { intensity: 30 });
+    let bestScore = 0;
+    for (const theme of themes) {
+      let score = 0;
+      for (const kw of theme.keywords) {
+        if (lower.includes(kw)) {
+          score += kw.length;
+        }
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        scene = {
+          theme: theme.name,
+          ...theme.config,
+        };
+      }
     }
 
-    if (actions.length === 0) {
-      addAction('rain', 0, 0, W, H, { intensity: 10 });
-    }
-
-    return { actions };
+    return scene;
   }
 
-  renderActionFrame(ctx, W, H, prompt, actionScene, t, f, totalFrames, duration) {
-    const grad = ctx.createLinearGradient(0, 0, 0, H);
-    grad.addColorStop(0, '#0d0d1a');
-    grad.addColorStop(0.4 + Math.sin(t * Math.PI * 2) * 0.04, '#1a1a3e');
-    grad.addColorStop(1, '#2d1b4e');
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, W, H);
+  // ============================================================
+  // Main Scene Renderer
+  // ============================================================
 
-    ctx.strokeStyle = 'rgba(108, 99, 255, 0.05)';
-    ctx.lineWidth = 2;
-    for (let w = 0; w < 3; w++) {
-      ctx.beginPath();
-      for (let x = 0; x <= W; x += 4) {
-        const y = H * 0.5
-          + Math.sin(x * 0.008 + t * 6 + w * 2.1) * 70
-          + Math.sin(x * 0.015 + t * 4 + w * 1.3) * 35;
-        if (x === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
+  renderScene(ctx, W, H, scene, t, f, totalFrames, duration) {
+    ctx.clearRect(0, 0, W, H);
+
+    this.drawSkyGradient(ctx, W, H, scene.colors.sky, t);
+
+    const elementOrder = [
+      'nebula', 'stars', 'sun', 'mountains', 'dunes',
+      'clouds', 'waves', 'ocean_reflection', 'heat_haze',
+      'buildings', 'city_lights', 'trees', 'trees_snow',
+      'leaves', 'snow_ground', 'castle', 'puddles',
+      'rain', 'snowflakes', 'fire', 'smoke', 'embers',
+      'fireflies', 'sparkles', 'shooting_stars', 'lightning',
+      'birds', 'seagulls', 'ships', 'butterflies', 'dragons',
+      'flowers', 'petals', 'neon', 'dust'
+    ];
+
+    for (const elementType of elementOrder) {
+      if (scene.elements.includes(elementType)) {
+        const fn = this['draw_' + elementType];
+        if (fn) fn.call(this, ctx, W, H, scene, t, f, totalFrames, duration);
       }
-      ctx.stroke();
     }
 
-    ctx.fillStyle = '#7c73ff';
-    ctx.font = 'bold 48px "Inter", Arial, sans-serif';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText('VideoForge AI', W / 2, 30);
-
-    ctx.fillStyle = 'rgba(120, 120, 200, 0.6)';
-    ctx.font = '20px "Inter", Arial, sans-serif';
-    ctx.fillText('Generated by AI', W / 2, 90);
-
-    ctx.strokeStyle = 'rgba(108, 99, 255, 0.3)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(W / 2 - 60, 125);
-    ctx.lineTo(W / 2 + 60, 125);
-    ctx.stroke();
-
-    this.renderWeatherEffects(ctx, W, H, t);
-
-    this.drawActionElements(ctx, W, H, actionScene, t, f, totalFrames, duration);
-
-    ctx.fillStyle = '#ffffff';
-    ctx.font = '32px "Inter", Arial, sans-serif';
-    const textY = H - 60;
-    this.wrapText(ctx, prompt, W / 2, textY, W - 120, 48);
-
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-    ctx.font = '13px monospace';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+    ctx.font = '14px "Inter", Arial, sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'bottom';
-    ctx.fillText(`${duration}s | ${f + 1}/${totalFrames}`, W - 20, H - 10);
+    ctx.fillText('VideoForge AI', W - 15, H - 10);
   }
 
-  drawActionElements(ctx, W, H, actionScene, t, f, totalFrames, duration) {
-    const scene = actionScene.actions;
-
-    for (const element of scene) {
-      const elementX = this.easeInOut(element.x, element.x + (element.w || W), t);
-      const elementY = this.easeInOut(element.y, element.y + (element.h || H), t);
-      const elementSize = this.easeInOut(0.5, 1.0, Math.sin(t * 2) * 0.5 + 0.5);
-
-      ctx.save();
-
-      switch (element.type) {
-        case 'wave':
-          this.drawWave(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t);
-          break;
-        case 'boat':
-          this.drawBoat(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t);
-          break;
-        case 'sunset':
-          this.drawSunset(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t, element.params);
-          break;
-        case 'rain':
-          this.drawRain(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t, element.params);
-          break;
-        case 'wolf':
-          this.drawWolf(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t);
-          break;
-        case 'fire':
-          this.drawFire(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, t, element.params);
-          break;
-        default:
-          this.drawElement(ctx, elementX, elementY, element.w * elementSize, element.h * elementSize, element.params);
-      }
-
-      ctx.restore();
+  drawSkyGradient(ctx, W, H, colors, t) {
+    const grad = ctx.createLinearGradient(0, 0, 0, H);
+    const len = colors.length;
+    for (let i = 0; i < len; i++) {
+      grad.addColorStop(i / (len - 1), colors[i]);
     }
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, W, H);
   }
 
-  easeInOut(start, end, t) {
-    const ease = t * t * (3 - 2 * t);
-    return start + (end - start) * ease;
-  }
-
-  drawWave(ctx, x, y, w, h, t) {
-    ctx.strokeStyle = 'rgba(0, 119, 190, 0.4)';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let i = 0; i < 100; i++) {
-      const height = Math.sin(t * 2 + i * 0.1) * 30 + 50;
-      const xPos = x + i * w * 0.01;
-      if (i === 0) ctx.moveTo(xPos, y + h);
-      else ctx.lineTo(xPos, y + h - height);
-    }
-    ctx.stroke();
-  }
-
-  drawBoat(ctx, x, y, w, h, t) {
-    ctx.fillStyle = '#8B4513';
-    ctx.fillRect(x, y + h * 0.3, w, h * 0.3);
-
-    ctx.strokeStyle = '#654321';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(x + w * 0.7, y + h * 0.4, w * 0.4, 0, Math.PI * 2);
-    ctx.stroke();
-
-    ctx.fillStyle = '#FF4444';
-    ctx.font = '12px "Inter"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText('⛵', x + w * 0.5, y + h * 0.3);
-  }
-
-  drawSunset(ctx, x, y, w, h, t, params) {
-    const gradient = ctx.createLinearGradient(0, y, 0, y + h);
-    gradient.addColorStop(0, '#FF4500');
-    gradient.addColorStop(0.5, '#FFD700');
-    gradient.addColorStop(1, '#8B0000');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, y, w, h);
-
-    ctx.fillStyle = 'rgba(255, 100, 100, 0.8)';
-    for (let i = 0; i < 20; i++) {
+  draw_stars(ctx, W, H, scene, t) {
+    const count = 100;
+    const seed = 42;
+    for (let i = 0; i < count; i++) {
+      const sx = ((i * 137.5 + seed) % W);
+      const sy = ((i * 97.3 + seed * 2) % (H * 0.6));
+      const brightness = 0.3 + 0.7 * Math.abs(Math.sin(t * 2 + i * 1.7));
+      const size = 1 + Math.sin(t * 3 + i * 2.3) * 0.5 + 0.5;
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + (brightness * 0.8) + ')';
       ctx.beginPath();
-      ctx.arc(x + Math.random() * w, y + Math.random() * h, Math.random() * 20, 0, Math.PI * 2);
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
       ctx.fill();
     }
   }
 
-  drawRain(ctx, x, y, w, h, t, params) {
-    ctx.fillStyle = 'rgba(174, 194, 224, 0.3)';
-    for (let i = 0; i < 30; i++) {
-      const dropX = x + Math.random() * w;
-      const dropY = y + Math.random() * h;
-      const dropLength = Math.random() * 20 + 10;
+  draw_sun(ctx, W, H, scene, t) {
+    const size = 80;
+    const sx = W * 0.7;
+    const sy = H * 0.25 + Math.sin(t * Math.PI) * 40;
+
+    const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, size * 2.5);
+    glow.addColorStop(0, 'rgba(255, 200, 100, 0.4)');
+    glow.addColorStop(0.5, 'rgba(255, 150, 50, 0.15)');
+    glow.addColorStop(1, 'rgba(255, 100, 0, 0)');
+    ctx.fillStyle = glow;
+    ctx.fillRect(sx - size * 2.5, sy - size * 2.5, size * 5, size * 5);
+
+    const sunGrad = ctx.createRadialGradient(sx, sy, 0, sx, sy, size);
+    sunGrad.addColorStop(0, '#fff8e0');
+    sunGrad.addColorStop(0.3, '#ffd700');
+    sunGrad.addColorStop(0.7, '#ff8c00');
+    sunGrad.addColorStop(1, '#ff4500');
+    ctx.fillStyle = sunGrad;
+    ctx.beginPath();
+    ctx.arc(sx, sy, size, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(255, 200, 100, 0.15)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2 + t * 0.3;
+      const len = size * (1.2 + Math.sin(t * 2 + i) * 0.3);
       ctx.beginPath();
-      ctx.moveTo(dropX, dropY);
-      ctx.lineTo(dropX, dropY + dropLength);
-      ctx.strokeStyle = 'rgba(174, 194, 224, 0.5)';
-      ctx.lineWidth = 1;
+      ctx.moveTo(sx + Math.cos(angle) * size * 0.8, sy + Math.sin(angle) * size * 0.8);
+      ctx.lineTo(sx + Math.cos(angle) * len, sy + Math.sin(angle) * len);
       ctx.stroke();
     }
   }
 
-  drawWolf(ctx, x, y, w, h, t) {
-    ctx.fillStyle = '#333';
-    ctx.fillRect(x, y, w, h * 0.6);
-
-    ctx.fillStyle = '#666';
-    ctx.fillRect(x + w * 0.3, y + h * 0.6, w * 0.4, h * 0.2);
-
-    ctx.fillStyle = '#333';
-    ctx.font = 'bold 8px "Inter"';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'top';
-    ctx.fillText('🐺', x + w * 0.5, y + h * 0.8);
-  }
-
-  drawFire(ctx, x, y, w, h, t, params) {
-    for (let i = 0; i < 20; i++) {
-      ctx.fillStyle = `rgb(${255 - i * 10}, ${Math.max(0, 150 - i * 8)}, ${Math.max(0, 50 - i * 2)})`;
-      const flameX = x + Math.random() * w;
-      const flameH = Math.random() * 30 + 10;
-      ctx.fillRect(flameX, y - flameH, 5, flameH);
+  draw_clouds(ctx, W, H, scene, t) {
+    const positions = [
+      { x: 0.1, y: 0.08, s: 1.0 },
+      { x: 0.35, y: 0.12, s: 0.8 },
+      { x: 0.6, y: 0.06, s: 1.2 },
+      { x: 0.85, y: 0.1, s: 0.7 },
+    ];
+    for (const cp of positions) {
+      const cx = ((cp.x + t * 0.02) % 1.2 - 0.1) * W;
+      const cy = cp.y * H;
+      const s = cp.s;
+      ctx.fillStyle = 'rgba(200, 210, 240, 0.3)';
+      const p = (x, y, r) => { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); };
+      p(cx, cy, 30 * s);
+      p(cx - 25 * s, cy + 5, 22 * s);
+      p(cx + 25 * s, cy + 5, 22 * s);
+      p(cx - 10 * s, cy - 8, 20 * s);
+      p(cx + 10 * s, cy - 8, 20 * s);
     }
   }
 
-  drawElement(ctx, x, y, w, h, params) {
-    ctx.fillStyle = 'rgba(108, 99, 255, 0.3)';
-    ctx.fillRect(x, y, w, h);
-    ctx.strokeStyle = 'rgba(108, 99, 255, 0.6)';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(x, y, w, h);
+  draw_waves(ctx, W, H, scene, t) {
+    const waveY = H * 0.65;
+    const waterGrad = ctx.createLinearGradient(0, waveY - 20, 0, H);
+    waterGrad.addColorStop(0, 'rgba(0, 100, 200, 0.5)');
+    waterGrad.addColorStop(0.3, 'rgba(0, 80, 180, 0.6)');
+    waterGrad.addColorStop(1, 'rgba(0, 40, 120, 0.8)');
+    ctx.fillStyle = waterGrad;
+    ctx.fillRect(0, waveY, W, H - waveY);
+
+    for (let w = 0; w < 5; w++) {
+      ctx.strokeStyle = 'rgba(100, 180, 255, ' + (0.15 - w * 0.02) + ')';
+      ctx.lineWidth = 2 - w * 0.3;
+      ctx.beginPath();
+      for (let x = 0; x <= W; x += 3) {
+        const y = waveY + w * 15 + Math.sin(x * 0.008 + t * 5 + w * 2.1) * 12 + Math.sin(x * 0.015 + t * 3 + w * 1.3) * 6;
+        if (x === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
   }
 
-  renderWeatherEffects(ctx, W, H, t) {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-    ctx.font = '12px "Inter"';
-    ctx.textAlign = 'right';
-    ctx.textBaseline = 'top';
-    ctx.fillText(`D∗${t.toFixed(2).replace('.', '')}`, W - 10, 20);
+  draw_ocean_reflection(ctx, W, H, scene, t) {
+    const waveY = H * 0.65;
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i < 20; i++) {
+      const rx = ((i * 73.1 + t * 40) % W);
+      const ry = waveY + 20 + ((i * 53.7) % (H - waveY - 30));
+      const rw = 8 + Math.sin(t * 2 + i) * 4;
+      const rh = 3 + Math.sin(t * 3 + i * 1.5) * 2;
+      ctx.fillStyle = '#ffd700';
+      ctx.fillRect(rx, ry, rw, rh);
+    }
+    ctx.globalAlpha = 1.0;
   }
 
-  wrapText(ctx, text, x, y, maxWidth, lineHeight) {
-    // Handle Cyrillic and any other Unicode text
-    const words = text.split(/\s+/);
-    let line = '';
-    let currentY = y;
-    for (const word of words) {
-      if (!word) continue;
-      const test = line ? line + ' ' + word : word;
-      if (ctx.measureText(test).width > maxWidth && line) {
-        ctx.fillText(line, x, currentY);
-        line = word;
-        currentY += lineHeight;
-      } else {
-        line = test;
+  draw_trees(ctx, W, H, scene, t) {
+    const positions = [
+      { x: 0.05, h: 0.4 }, { x: 0.15, h: 0.5 }, { x: 0.25, h: 0.35 },
+      { x: 0.7, h: 0.45 }, { x: 0.82, h: 0.55 }, { x: 0.92, h: 0.38 },
+    ];
+    const gy = H * 0.72;
+    for (const tp of positions) {
+      const tx = tp.x * W;
+      const th = tp.h * H;
+      ctx.fillStyle = '#4a3520';
+      ctx.fillRect(tx - 6, gy - th * 0.6, 12, th * 0.6);
+      const cols = ['#2d6b2d', '#3a8a3a', '#4a9a4a'];
+      for (let i = 0; i < 4; i++) {
+        const fy = gy - th * 0.6 - i * th * 0.12;
+        const fr = (0.3 - i * 0.04) * th;
+        ctx.fillStyle = cols[i % cols.length];
+        ctx.beginPath();
+        ctx.arc(tx, fy, fr, 0, Math.PI * 2);
+        ctx.fill();
       }
     }
-    if (line) ctx.fillText(line, x, currentY);
   }
 
+  draw_trees_snow(ctx, W, H, scene, t) {
+    const positions = [{ x: 0.1, h: 0.35 }, { x: 0.2, h: 0.45 }, { x: 0.75, h: 0.4 }, { x: 0.88, h: 0.5 }];
+    const gy = H * 0.78;
+    for (const tp of positions) {
+      const tx = tp.x * W;
+      const th = tp.h * H;
+      ctx.fillStyle = '#3a2a1a';
+      ctx.fillRect(tx - 5, gy - th * 0.5, 10, th * 0.5);
+      for (let i = 0; i < 3; i++) {
+        const lh = th * 0.25;
+        const ly = gy - th * 0.5 - i * lh;
+        const lw = (0.5 - i * 0.12) * th;
+        ctx.fillStyle = ['#c0d8ee', '#d8e8f8', '#eef4fa'][i];
+        ctx.beginPath();
+        ctx.moveTo(tx - lw, ly + lh);
+        ctx.lineTo(tx, ly);
+        ctx.lineTo(tx + lw, ly + lh);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
+  draw_mountains(ctx, W, H, scene, t) {
+    const layers = [
+      { c: '#2a3a5e', o: 0, s: 1.0, yB: H * 0.55 },
+      { c: '#3a4a6e', o: -20, s: 0.85, yB: H * 0.6 },
+      { c: '#4a5a7e', o: -40, s: 0.7, yB: H * 0.63 },
+    ];
+    for (const l of layers) {
+      ctx.fillStyle = l.c;
+      ctx.beginPath();
+      ctx.moveTo(0, H);
+      for (let x = 0; x <= W; x += 5) {
+        const h = l.s * (Math.sin(x * 0.002 + l.o * 0.1) * 60 + Math.sin(x * 0.005 + l.o * 0.2) * 40 + Math.sin(x * 0.001 + l.o * 0.05) * 80);
+        ctx.lineTo(x, l.yB - h);
+      }
+      ctx.lineTo(W, H);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  draw_dunes(ctx, W, H, scene, t) {
+    ctx.fillStyle = '#c4a060';
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.7);
+    for (let x = 0; x <= W; x += 4) {
+      ctx.lineTo(x, H * 0.7 + Math.sin(x * 0.003 + t * 0.2) * 30 + Math.sin(x * 0.007 + t * 0.1) * 15);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+
+    ctx.fillStyle = '#d4b070';
+    ctx.beginPath();
+    ctx.moveTo(0, H * 0.75);
+    for (let x = 0; x <= W; x += 4) {
+      ctx.lineTo(x, H * 0.75 + Math.sin(x * 0.004 + t * 0.15 + 1) * 25 + Math.sin(x * 0.009 + t * 0.08) * 12);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+  }
+
+  draw_heat_haze(ctx, W, H, scene, t) {
+    ctx.globalAlpha = 0.1;
+    for (let i = 0; i < 15; i++) {
+      const hx = ((i * 97.3 + t * 20) % W);
+      const hy = H * 0.5 + Math.sin(i * 3 + t * 2) * 50;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(hx, hy, 30 + Math.sin(t + i) * 10, 2);
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  draw_buildings(ctx, W, H, scene, t) {
+    const bld = [
+      [0.02, 0.06, 0.3], [0.09, 0.04, 0.45], [0.14, 0.05, 0.35], [0.2, 0.03, 0.5],
+      [0.24, 0.06, 0.4], [0.31, 0.04, 0.55], [0.36, 0.05, 0.38], [0.42, 0.04, 0.48],
+      [0.47, 0.07, 0.6], [0.55, 0.04, 0.42], [0.6, 0.05, 0.52], [0.66, 0.04, 0.36],
+      [0.71, 0.06, 0.58], [0.78, 0.04, 0.44], [0.83, 0.05, 0.5], [0.89, 0.04, 0.38],
+      [0.94, 0.05, 0.46],
+    ];
+    const gy = H * 0.72;
+    for (const b of bld) {
+      const bx = b[0] * W, bw = b[1] * W, bh = b[2] * H;
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(bx, gy - bh, bw, bh);
+      for (let wy = 0; wy < bh - 8; wy += 14) {
+        for (let wx = 0; wx < bw - 6; wx += 12) {
+          const lit = Math.sin(t * 0.5 + bx * 0.01 + wy * 0.05) > 0.2;
+          ctx.fillStyle = lit ? 'rgba(255, 200, 100, 0.8)' : 'rgba(100, 100, 150, 0.3)';
+          ctx.fillRect(bx + 4 + wx, gy - bh + 4 + wy, 6, 8);
+        }
+      }
+      ctx.strokeStyle = 'rgba(100, 100, 150, 0.3)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(bx, gy - bh, bw, bh);
+    }
+  }
+
+  draw_city_lights(ctx, W, H, scene, t) {
+    const gy = H * 0.72;
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i < 30; i++) {
+      const lx = ((i * 47.3 + t * 10) % W);
+      const ly = gy - 5 - ((i * 13.7) % 40);
+      const glow = ctx.createRadialGradient(lx, ly, 0, lx, ly, 15);
+      glow.addColorStop(0, '#ffab00');
+      glow.addColorStop(1, 'rgba(255, 171, 0, 0)');
+      ctx.fillStyle = glow;
+      ctx.fillRect(lx - 15, ly - 15, 30, 30);
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  draw_neon(ctx, W, H, scene, t) {
+    ctx.globalAlpha = 0.2 + Math.sin(t * 3) * 0.1;
+    const cols = ['#ff00ff', '#00ffff', '#ff0066', '#00ff66', '#ffff00'];
+    for (let i = 0; i < 5; i++) {
+      const nx = ((i * 113.7 + t * 30) % W);
+      const nh = 20 + Math.sin(t + i) * 10;
+      ctx.fillStyle = cols[i];
+      ctx.fillRect(nx, H * 0.3, 3, nh);
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  draw_rain(ctx, W, H, scene, t) {
+    ctx.strokeStyle = 'rgba(174, 194, 224, 0.4)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 60; i++) {
+      const rx = ((i * 73.1 + t * 120) % W);
+      const ry = ((i * 53.7 + t * 200) % H);
+      const rlen = 15 + ((i * 37.1) % 15);
+      const wind = scene.wind * 8;
+      ctx.beginPath();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(rx + wind, ry + rlen);
+      ctx.stroke();
+    }
+  }
+
+  draw_puddles(ctx, W, H, scene, t) {
+    ctx.globalAlpha = 0.15;
+    const gy = H * 0.72;
+    for (let i = 0; i < 8; i++) {
+      const px = ((i * 127.1) % W);
+      const py = gy + 10 + ((i * 67.3) % (H - gy - 20));
+      const pr = 15 + ((i * 31.7) % 20);
+      ctx.fillStyle = '#6868a8';
+      ctx.beginPath();
+      ctx.ellipse(px, py, pr, pr * 0.5, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  draw_lightning(ctx, W, H, scene, t) {
+    if (Math.sin(t * 7) > 0.95) {
+      ctx.fillStyle = 'rgba(200, 220, 255, ' + ((Math.sin(t * 7) - 0.95) * 3) + ')';
+      ctx.fillRect(0, 0, W, H);
+      ctx.strokeStyle = 'rgba(200, 220, 255, 0.6)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      const lx = W * 0.4;
+      ctx.moveTo(lx, 0);
+      let ly = 0;
+      for (let i = 0; i < 8; i++) {
+        ly += 20 + Math.random() * 30;
+        ctx.lineTo(lx + (Math.random() - 0.5) * 40, ly);
+      }
+      ctx.stroke();
+    }
+  }
+
+  draw_snowflakes(ctx, W, H, scene, t) {
+    for (let i = 0; i < 60; i++) {
+      const sx = ((i * 73.1 + t * 50 + Math.sin(t * 0.5 + i) * 20) % W);
+      const sy = ((i * 53.7 + t * 80) % H);
+      const size = 2 + ((i * 17.3) % 3);
+      ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.4 + Math.sin(t + i * 2) * 0.2) + ')';
+      ctx.beginPath();
+      ctx.arc(sx, sy, size, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_snow_ground(ctx, W, H, scene, t) {
+    const gy = H * 0.78;
+    const sg = ctx.createLinearGradient(0, gy, 0, H);
+    sg.addColorStop(0, '#c0d8ee');
+    sg.addColorStop(0.3, '#d8e8f8');
+    sg.addColorStop(1, '#eef4fa');
+    ctx.fillStyle = sg;
+    ctx.fillRect(0, gy, W, H - gy);
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(0, gy);
+    for (let x = 0; x <= W; x += 5) {
+      ctx.lineTo(x, gy + Math.sin(x * 0.01 + t * 0.3) * 8 + Math.sin(x * 0.003) * 12);
+    }
+    ctx.lineTo(W, H); ctx.lineTo(0, H); ctx.closePath(); ctx.fill();
+  }
+
+  draw_fireflies(ctx, W, H, scene, t) {
+    for (let i = 0; i < scene.particleCount; i++) {
+      const fx = ((i * 137.5 + Math.sin(t * 0.3 + i) * 30) % W);
+      const fy = ((i * 97.3 + Math.cos(t * 0.2 + i * 1.5) * 20) % (H * 0.8));
+      const g = 0.3 + 0.7 * Math.abs(Math.sin(t * 2 + i * 3.7));
+      const sz = 2 + Math.sin(t + i * 2) * 1;
+      const grad = ctx.createRadialGradient(fx, fy, 0, fx, fy, 8 + sz * 2);
+      grad.addColorStop(0, 'rgba(200, 255, 100, ' + (g * 0.8) + ')');
+      grad.addColorStop(0.5, 'rgba(150, 200, 50, ' + (g * 0.3) + ')');
+      grad.addColorStop(1, 'rgba(100, 150, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(fx, fy, 8 + sz * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_sparkles(ctx, W, H, scene, t) {
+    for (let i = 0; i < scene.particleCount; i++) {
+      const sx = ((i * 157.3 + Math.sin(t * 0.5 + i * 1.3) * 50) % W);
+      const sy = ((i * 113.7 + Math.cos(t * 0.4 + i * 2.1) * 40) % (H * 0.9));
+      const g = 0.2 + 0.8 * Math.abs(Math.sin(t * 3 + i * 4.1));
+      const sz = 1.5 + Math.sin(t * 2 + i * 3) * 1;
+      const cols = ['#e040fb', '#7c4dff', '#ff69b4', '#00d4ff'];
+      ctx.fillStyle = cols[i % 4];
+      ctx.globalAlpha = g * 0.6;
+      ctx.fillRect(sx + Math.cos(t * 2 + i) * sz * 2, sy - 0.5, (Math.cos(t * 2 + i + Math.PI) - Math.cos(t * 2 + i)) * sz * 2, 1);
+      ctx.fillRect(sx - 0.5, sy + Math.sin(t * 2 + i) * sz * 2, 1, (Math.sin(t * 2 + i + Math.PI) - Math.sin(t * 2 + i)) * sz * 2);
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+      ctx.beginPath();
+      ctx.arc(sx, sy, sz * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_shooting_stars(ctx, W, H, scene, t) {
+    if (Math.sin(t * 1.3) <= 0.7) return;
+    const p = (Math.sin(t * 1.3) - 0.7) / 0.3;
+    const sx = W * (0.8 - p * 0.7);
+    const sy = H * (0.1 + p * 0.3);
+    ctx.strokeStyle = 'rgba(255, 255, 255, ' + (p * 0.5) + ')';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx - 40 * p, sy + 20 * p);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, ' + p + ')';
+    ctx.beginPath();
+    ctx.arc(sx, sy, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  draw_fire(ctx, W, H, scene, t) {
+    const gy = H * 0.72;
+    for (let i = 0; i < 30; i++) {
+      const fx = ((i * 73.1 + Math.sin(t * 2 + i) * 25) % W);
+      const fh = 40 + ((i * 37.3) % 50) * (0.5 + Math.sin(t * 3 + i * 1.7) * 0.3);
+      const fw = 6 + Math.sin(t * 4 + i * 2.3) * 3;
+      const gr = ctx.createLinearGradient(fx, gy, fx, gy - fh);
+      gr.addColorStop(0, 'rgba(255, 200, 50, ' + (0.6 + Math.sin(t + i) * 0.2) + ')');
+      gr.addColorStop(0.4, 'rgba(255, 100, 0, ' + (0.5 + Math.sin(t * 2 + i) * 0.2) + ')');
+      gr.addColorStop(0.7, 'rgba(200, 50, 0, ' + (0.3 + Math.sin(t * 2.5 + i) * 0.15) + ')');
+      gr.addColorStop(1, 'rgba(100, 0, 0, 0)');
+      ctx.fillStyle = gr;
+      ctx.beginPath();
+      ctx.moveTo(fx - fw, gy);
+      ctx.quadraticCurveTo(fx - fw * 0.5, gy - fh * 0.5, fx, gy - fh);
+      ctx.quadraticCurveTo(fx + fw * 0.5, gy - fh * 0.5, fx + fw, gy);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  draw_smoke(ctx, W, H, scene, t) {
+    ctx.globalAlpha = 0.15;
+    for (let i = 0; i < 15; i++) {
+      const sx = ((i * 97.3 + t * 10) % W);
+      const sy = H * 0.3 - ((i * 23.7 + t * 5) % (H * 0.3));
+      const sr = 20 + ((i * 31.7) % 30) + Math.sin(t * 0.5 + i) * 10;
+      ctx.fillStyle = '#666';
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1.0;
+  }
+
+  draw_embers(ctx, W, H, scene, t) {
+    for (let i = 0; i < 30; i++) {
+      const ex = ((i * 73.1 + Math.sin(t * 0.5 + i * 1.3) * 30) % W);
+      const ey = (H * 0.7 - (i * 23.7 + t * 30) % (H * 0.5));
+      const g = 0.3 + 0.7 * Math.abs(Math.sin(t * 2 + i * 3.7));
+      ctx.fillStyle = 'rgba(255, ' + (150 + Math.floor(g * 50)) + ', 50, ' + (g * 0.6) + ')';
+      ctx.beginPath();
+      ctx.arc(ex, ey, 2 + g * 2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_birds(ctx, W, H, scene, t) {
+    ctx.strokeStyle = 'rgba(50, 50, 50, 0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i++) {
+      const bx = ((i * 113.7 + t * 15 + i * 30) % W);
+      const by = H * 0.15 + ((i * 43.7) % (H * 0.15));
+      const wf = Math.sin(t * 4 + i * 2) * 0.3 + 0.5;
+      const ws = 8 + ((i * 7.3) % 5);
+      ctx.beginPath();
+      ctx.moveTo(bx - ws, by + wf * 4);
+      ctx.quadraticCurveTo(bx, by, bx + ws, by + wf * 4);
+      ctx.stroke();
+    }
+  }
+
+  draw_seagulls(ctx, W, H, scene, t) {
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 4; i++) {
+      const bx = ((i * 127.3 + t * 20 + i * 40) % W);
+      const by = H * 0.2 + ((i * 53.7) % (H * 0.12));
+      const wf = Math.sin(t * 5 + i * 1.5);
+      const ww = 10 + ((i * 11.3) % 6);
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.quadraticCurveTo(bx - ww, by - 5 - wf * 3, bx - ww * 0.5, by + 3);
+      ctx.moveTo(bx, by);
+      ctx.quadraticCurveTo(bx + ww, by - 5 + wf * 3, bx + ww * 0.5, by + 3);
+      ctx.stroke();
+    }
+  }
+
+  draw_butterflies(ctx, W, H, scene, t) {
+    const cols = ['#ff69b4', '#ffa500', '#00d4ff', '#e040fb', '#98fb98', '#ffd700'];
+    for (let i = 0; i < 6; i++) {
+      const bx = ((i * 97.3 + Math.sin(t * 0.7 + i * 2) * 60) % W);
+      const by = H * 0.3 + Math.sin(t * 0.5 + i * 3) * 40;
+      const wf = Math.abs(Math.sin(t * 6 + i * 2.5));
+      ctx.fillStyle = cols[i];
+      ctx.globalAlpha = 0.6;
+      ctx.beginPath();
+      ctx.ellipse(bx - 6, by, 5 * wf + 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.ellipse(bx + 6, by, 5 * wf + 2, 4, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#333';
+      ctx.fillRect(bx - 1, by - 3, 2, 6);
+    }
+  }
+
+  draw_dragons(ctx, W, H, scene, t) {
+    for (let i = 0; i < 2; i++) {
+      const dx = W * (0.3 + i * 0.5) + Math.sin(t * 0.3 + i * 5) * 50;
+      const dy = H * 0.15 + Math.sin(t * 0.2 + i * 3) * 20;
+      ctx.fillStyle = 'rgba(100, 50, 120, ' + (0.4 + Math.sin(t + i) * 0.15) + ')';
+      ctx.beginPath();
+      ctx.ellipse(dx, dy, 25, 8, 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(dx - 10, dy - 5);
+      ctx.quadraticCurveTo(dx - 25, dy - 20 - Math.sin(t * 2 + i) * 5, dx - 5, dy);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(dx - 10, dy + 5);
+      ctx.quadraticCurveTo(dx - 25, dy + 20 + Math.sin(t * 2 + i) * 5, dx - 5, dy);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(dx + 22, dy - 2, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_castle(ctx, W, H, scene, t) {
+    const cx = W * 0.5, gy = H * 0.7, ch = H * 0.35;
+    ctx.fillStyle = 'rgba(80, 40, 120, 0.6)';
+    ctx.fillRect(cx - 80, gy - ch, 160, ch);
+    ctx.fillRect(cx - 100, gy - ch * 1.15, 30, ch * 1.15);
+    ctx.fillRect(cx + 70, gy - ch * 1.15, 30, ch * 1.15);
+    ctx.fillRect(cx - 40, gy - ch * 1.3, 80, ch * 1.3);
+    ctx.fillStyle = 'rgba(100, 50, 140, 0.7)';
+    ctx.fillRect(cx - 100, gy - ch * 1.15 - 8, 30, 8);
+    ctx.fillRect(cx + 70, gy - ch * 1.15 - 8, 30, 8);
+    ctx.fillRect(cx - 40, gy - ch * 1.3 - 10, 80, 10);
+    ctx.fillStyle = 'rgba(255, 200, 100, ' + (0.6 + Math.sin(t * 0.5) * 0.2) + ')';
+    ctx.fillRect(cx - 50, gy - ch * 0.7, 16, 24);
+    ctx.fillRect(cx + 34, gy - ch * 0.7, 16, 24);
+    ctx.fillRect(cx - 8, gy - ch * 0.4, 16, 24);
+    ctx.fillStyle = '#1a002a';
+    ctx.fillRect(cx - 12, gy - 40, 24, 40);
+    ctx.beginPath();
+    ctx.arc(cx, gy - 40, 15, Math.PI, 0);
+    ctx.fill();
+  }
+
+  draw_flowers(ctx, W, H, scene, t) {
+    const gy = H * 0.72;
+    const cols = ['#ff69b4', '#ff1493', '#ffa500', '#ffd700', '#ff6347', '#da70d6'];
+    for (let i = 0; i < 12; i++) {
+      const fx = ((i * 73.1 + 20) % (W - 40)) + 20;
+      const sway = Math.sin(t * 0.8 + i * 1.5) * 5;
+      ctx.strokeStyle = '#4a8a3a';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(fx, gy);
+      ctx.quadraticCurveTo(fx + sway, gy - 25, fx + sway * 0.5, gy - 35);
+      ctx.stroke();
+      ctx.fillStyle = cols[i % cols.length];
+      for (let p = 0; p < 5; p++) {
+        const a = (p / 5) * Math.PI * 2 + Math.sin(t + i) * 0.1;
+        ctx.beginPath();
+        ctx.ellipse(fx + sway * 0.5 + Math.cos(a) * 5, gy - 38 + Math.sin(a) * 5, 4, 3, a, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffd700';
+      ctx.beginPath();
+      ctx.arc(fx + sway * 0.5, gy - 38, 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_petals(ctx, W, H, scene, t) {
+    const cols = ['#ff69b4', '#ffb7c5', '#ff1493', '#ffa500', '#ffd700'];
+    for (let i = 0; i < 15; i++) {
+      const px = ((i * 97.3 + t * 30 + Math.sin(t * 0.3 + i) * 20) % W);
+      const py = ((i * 67.3 + t * 50) % H);
+      const rot = Math.sin(t * 3 + i * 2) * 0.5;
+      ctx.fillStyle = cols[i % 5];
+      ctx.globalAlpha = 0.5;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 4, 2, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  draw_nebula(ctx, W, H, scene, t) {
+    ctx.globalAlpha = 0.3;
+    const nc = [
+      { x: W * 0.3, y: H * 0.3, r: 120, c: '#7c4dff' },
+      { x: W * 0.7, y: H * 0.4, r: 100, c: '#e040fb' },
+      { x: W * 0.5, y: H * 0.2, r: 80, c: '#448aff' },
+    ];
+    for (const n of nc) {
+      const grad = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, n.r);
+      grad.addColorStop(0, n.c);
+      grad.addColorStop(0.5, n.c);
+      grad.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  draw_planets(ctx, W, H, scene, t) {
+    const p1x = W * 0.2, p1y = H * 0.3, p1r = 30 + Math.sin(t * 0.3) * 2;
+    ctx.fillStyle = 'rgba(200, 180, 255, 0.15)';
+    ctx.beginPath();
+    ctx.ellipse(p1x, p1y, p1r * 1.8, p1r * 0.3, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    const g = ctx.createRadialGradient(p1x - 5, p1y - 5, 0, p1x, p1y, p1r);
+    g.addColorStop(0, '#8a6aff');
+    g.addColorStop(0.7, '#5a3aff');
+    g.addColorStop(1, '#3a1adf');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(p1x, p1y, p1r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#e040fb';
+    ctx.beginPath();
+    ctx.arc(W * 0.85 + Math.sin(t * 0.2) * 10, H * 0.25 + Math.cos(t * 0.3) * 5, 15, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#00d4ff';
+    ctx.beginPath();
+    ctx.arc(W * 0.4 + Math.sin(t * 0.15) * 30, H * 0.15, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  draw_dust(ctx, W, H, scene, t) {
+    for (let i = 0; i < 20; i++) {
+      const dx = ((i * 73.1 + t * 15) % W);
+      const dy = H * 0.3 + ((i * 53.7 + Math.sin(t + i * 2) * 20) % (H * 0.4));
+      ctx.fillStyle = 'rgba(200, 180, 150, ' + (0.1 + Math.sin(t * 0.5 + i) * 0.05) + ')';
+      ctx.beginPath();
+      ctx.arc(dx, dy, 2 + Math.sin(t + i) * 1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  draw_leaves(ctx, W, H, scene, t) {
+    const cols = ['#4a8a3a', '#6aaa5a', '#8aca7a', '#3a7a2a'];
+    for (let i = 0; i < 10; i++) {
+      const lx = ((i * 83.1 + t * 20 + Math.sin(t * 0.4 + i) * 30) % W);
+      const ly = ((i * 57.3 + t * 35) % H);
+      const rot = Math.sin(t * 2 + i * 1.5) * 0.8;
+      ctx.fillStyle = cols[i % 4];
+      ctx.globalAlpha = 0.4;
+      ctx.save();
+      ctx.translate(lx, ly);
+      ctx.rotate(rot);
+      ctx.beginPath();
+      ctx.ellipse(0, 0, 6, 3, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  draw_ships(ctx, W, H, scene, t) {
+    const wy = H * 0.65;
+    for (let i = 0; i < 2; i++) {
+      const sx = (W * (0.15 + i * 0.4) + Math.sin(t * 0.2 + i) * 20);
+      const sy = wy + 5 + Math.sin(t * 2 + i) * 3;
+      ctx.fillStyle = '#4a3520';
+      ctx.beginPath();
+      ctx.moveTo(sx - 20, sy);
+      ctx.lineTo(sx - 15, sy + 8);
+      ctx.lineTo(sx + 15, sy + 8);
+      ctx.lineTo(sx + 20, sy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = '#3a2a10';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx, sy - 25);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(200, 200, 220, 0.6)';
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - 22);
+      ctx.lineTo(sx + 18, sy - 5);
+      ctx.lineTo(sx, sy - 5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(sx, sy - 22);
+      ctx.lineTo(sx - 14, sy - 5);
+      ctx.lineTo(sx, sy - 5);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
+  // ============================================================
+  // Utility methods
+  // ============================================================
+
   saveVideo(id, prompt, duration, blob) {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       if (!this.db) return resolve();
       try {
         const tx = this.db.transaction('videos', 'readwrite');
@@ -591,12 +1379,7 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
     this.galleryGrid.innerHTML = '';
 
     if (!videos || videos.length === 0) {
-      this.galleryGrid.innerHTML = `
-        <div class="gallery-empty">
-          <div class="empty-icon">\u{1F3AC}</div>
-          <h3>Пока нет видео</h3>
-          <p>Создай своё первое видео с помощью ИИ!</p>
-        </div>`;
+      this.galleryGrid.innerHTML = '<div class="gallery-empty"><div class="empty-icon">🎬</div><h3>Пока нет видео</h3><p>Создай своё первое видео с помощью ИИ!</p></div>';
       return;
     }
 
@@ -611,16 +1394,14 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
 
       const url = this.videoUrls[v.id];
       const videoHtml = url
-        ? `<video src="${url}" controls playsinline preload="metadata"></video>`
-        : `<div style="padding:40px;text-align:center;background:var(--bg-input);color:var(--text-muted)">\u{1F3A5} Видео недоступно</div>`;
+        ? '<video src="' + url + '" controls playsinline preload="metadata"></video>'
+        : '<div style="padding:40px;text-align:center;background:var(--bg-input);color:var(--text-muted)">🎥 Видео недоступно</div>';
 
-      item.innerHTML = `
-        ${videoHtml}
-        <div class="gallery-item-info">
-          <div class="gallery-item-prompt">${this.escapeHtml(v.prompt)}</div>
-          <div class="gallery-item-date">${dateStr}</div>
-          <span class="gallery-item-status completed">\u2705 Готово</span>
-        </div>`;
+      item.innerHTML = videoHtml +
+        '<div class="gallery-item-info">' +
+        '<div class="gallery-item-prompt">' + this.escapeHtml(v.prompt) + '</div>' +
+        '<div class="gallery-item-date">' + dateStr + '</div>' +
+        '<span class="gallery-item-status completed">✅ Готово</span></div>';
 
       this.galleryGrid.appendChild(item);
     });
@@ -638,9 +1419,14 @@ const mimeType = MediaRecorderClass.isTypeSupported('video/webm;codecs=vp9')
         break;
       case 'completed':
         this.statusCompleted.style.display = 'block';
-        if (typeof data === 'string' && data.startsWith('blob:')) {
+        if (typeof data === 'string' && (data.startsWith('blob:') || data.startsWith('http') || data.startsWith('/videos/'))) {
           this.generatedVideo.src = data;
-          this.downloadBtn.href = data;
+          if (data.startsWith('/videos/')) {
+            this.downloadBtn.href = window.location.origin + data;
+            this.downloadBtn.download = 'ai-video.mp4';
+          } else {
+            this.downloadBtn.href = data;
+          }
         }
         break;
       case 'failed':
