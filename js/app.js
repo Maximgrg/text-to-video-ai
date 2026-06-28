@@ -170,6 +170,12 @@ class VideoForgeApp {
 
     try {
       if (this.serverMode === 'ai') {
+        // WARNING: If using Civitai API directly from the client-side (e.g., on GitHub Pages),
+        // the API key should NOT be hardcoded here. It should be securely managed,
+        // potentially fetched from a backend or environment variables during build.
+        // Direct exposure is a security risk.
+        // Example: const apiKey = process.env.CIVITAI_API_KEY; (if build process supports it)
+        
         this.updateTips([
           '🤖 Civitai AI генерирует видео...',
           '⏳ Обычно 1-2 минуты',
